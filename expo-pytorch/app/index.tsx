@@ -47,7 +47,7 @@ export default function HomeScreen() {
     if(permissionResponse?.status === 'granted'){
           const permissionSpecific = await MediaLibrary.getPermissionsAsync();
           if ((permissionSpecific.accessPrivileges === 'all')){ // for distinguishing between limited and full library access
-            console.log("Failed to change permissions, already set to 'Entire Library. Change Access in settings")
+            console.log("Failed to change permissions, already set to 'None. Change Access in settings")
             Alert.alert(
                 "Full Libary Access is already enabled.",
                 "To change access, go to Settings.",
@@ -57,7 +57,11 @@ export default function HomeScreen() {
                 ],
                 { cancelable: true }
             );
-          }
+        }
+        else if ((permissionSpecific.accessPrivileges === 'limited')){ // for distinguishing between limited and full library access
+            console.log("Failed to change permissions, already set to 'Entire Library. Change Access in settings")
+            await MediaLibrary.presentPermissionsPickerAsync();
+        }
     }
     else{
       await MediaLibrary.presentPermissionsPickerAsync();

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pressable, Image, ScrollView, Text, View, Linking, StyleSheet } from "react-native";
+import { Alert, Pressable, Image, ScrollView, Text, View, Linking, StyleSheet } from "react-native";
 
 import * as MediaLibrary from "expo-media-library";
 
@@ -12,10 +12,20 @@ export default function HomeScreen() {
       const checkPermsAndLoadImages = async () =>{
         if(permissionResponse?.status === 'granted'){
           const permissionSpecific = await MediaLibrary.getPermissionsAsync();
-
           if ((permissionSpecific.accessPrivileges === 'all' || permissionSpecific.accessPrivileges === 'limited')){ // for distinguishing between limited and full library access
             await loadImages()
           }
+        }
+        else if(permissionResponse?.status === 'denied' && permissionResponse.canAskAgain === false){
+            Alert.alert(
+                "Permission Required",
+                "Photo access is disabled. Please enable it in Settings.",
+                [
+                    {text: "Cancel", style: "cancel"},
+                    {text: "Open Settings", onPress: () => Linking.openSettings()},
+                ],
+                { cancelable: true }
+            );
         }
       };
 
@@ -38,6 +48,15 @@ export default function HomeScreen() {
           const permissionSpecific = await MediaLibrary.getPermissionsAsync();
           if ((permissionSpecific.accessPrivileges === 'all')){ // for distinguishing between limited and full library access
             console.log("Failed to change permissions, already set to 'Entire Library. Change Access in settings")
+            Alert.alert(
+                "Full Libary Access is already enabled.",
+                "To change access, go to Settings.",
+                [
+                    {text: "Cancel", style: "cancel"},
+                    {text: "Open Settings", onPress: () => Linking.openSettings()},
+                ],
+                { cancelable: true }
+            );
           }
     }
     else{

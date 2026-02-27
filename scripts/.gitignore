@@ -1,0 +1,16 @@
+# Model weights and binaries — too large for git; download or generate locally
+blazeface.pth
+anchors.npy
+age_model/
+gender_model/
+age_model.pte
+gender_model.pte
+*.pt
+
+# Scratch / superseded scripts
+blazeface.py
+face_demo.py
+
+# Python cache
+__pycache__/
+*.pyc

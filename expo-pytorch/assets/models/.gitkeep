@@ -1,0 +1,2 @@
+# Drop blazeface.pte, age_model.pte, gender_model.pte here after running scripts/export_*.py
+# These files are large binaries — add them to .gitignore if not using Git LFS.

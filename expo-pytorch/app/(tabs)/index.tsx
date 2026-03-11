@@ -1,11 +1,46 @@
 import { useEffect, useState } from "react";
 import { Alert, Pressable, Image, ScrollView, Text, View, Linking, StyleSheet } from "react-native";
+import { AlbumContext } from "../../AlbumContext";
+import { useContext } from "react";
+import { SaveFormat, useImageManipulator } from 'expo-image-manipulator';
 
-import * as MediaLibrary from "expo-media-library";
+import * as MediaLibrary from 'expo-media-library';
+import * as ImageManipulator from 'expo-image-manipulator';
+
+export async function getLocalUri(asset: MediaLibrary.Asset): Promise<string> {
+  // 1. Get the local file path for the asset
+  const info = await MediaLibrary.getAssetInfoAsync(asset.id);
+  if (!info.localUri) throw new Error(`Cannot get local URI for asset ${asset.id}`);
+
+  let localUri = info.localUri;
+
+  // 2. Early return if already a local file and not HEIC
+  if (localUri.startsWith('file://') && !localUri.toLowerCase().endsWith('.heic')) {
+    return localUri;
+  }
+
+  // 3. If HEIC, convert to JPEG using ImageManipulator
+  if (localUri.toLowerCase().endsWith('.heic')) {
+    console.log("Detected HEIC:", localUri);
+    const result = await ImageManipulator.manipulateAsync(
+      localUri,
+      [], // no resize or rotation
+      { format: ImageManipulator.SaveFormat.JPEG, compress: 1 }
+    );
+    localUri = result.uri;
+  }
+
+  // 4. Return the local URI (guaranteed to be a file:// path)
+  console.log("KEY DEBUG: ", localUri)
+  return localUri;
+}
+
+
 
 export default function HomeScreen() {
   const [permissionResponse, requestPermission] = MediaLibrary.usePermissions();
-  const [photos, setPhotos] = useState<MediaLibrary.Asset[]>([])
+  //const [photos, setPhotos] = useState<MediaLibrary.Asset[]>([])
+  const { assets, setAssets } = useContext(AlbumContext);
 
   useEffect(
     () => {
@@ -34,14 +69,34 @@ export default function HomeScreen() {
   );
   
   const loadImages = async () => {
-    const media = await MediaLibrary.getAssetsAsync(
-      {
-        mediaType: 'photo',
-        sortBy: [['creationTime', true]],
-      }
+    const media = await MediaLibrary.getAssetsAsync({
+      mediaType: 'photo',
+      sortBy: [['creationTime', true]],
+    });
+
+    const convertedUris = await Promise.all(
+      media.assets.map(asset => getLocalUri(asset))
     );
-    setPhotos(media.assets);
+
+    const updatedAssets: MediaLibrary.Asset[] = [];
+
+    for (let i = 0; i < media.assets.length; i++) {
+      const asset = media.assets[i];
+      updatedAssets.push({
+        ...asset, // create a new object
+        uri: convertedUris[i], // override URI
+      });
+    }
+    setAssets(updatedAssets); // spread to create a new array reference
+
+    /*setAssets(
+      convertedUris.map((uri, index) => ({
+        ...media.assets[index],
+       uri, // override original URI with JPEG-converted URI
+      }))
+    );*/
   };
+  
 
   const changeAccess = async () => {
     if(permissionResponse?.status === 'granted'){
@@ -96,7 +151,7 @@ export default function HomeScreen() {
               <Text style={styles.button}>Change Access.</Text>
             </Pressable>
 
-            {photos.map(photo => (
+            {assets.map(photo => (
               <Image 
                 key={photo.id} 
                 source={{uri: photo.uri}}

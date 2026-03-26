@@ -45,5 +45,7 @@ expo-pytorch/android
 # large model files (use Git LFS or host elsewhere; GitHub limit 100MB)
 expo-pytorch/assets/models/age_model.pte
 expo-pytorch/assets/models/gender_model.pte
+expo-pytorch/assets/models/nsfw_model.pte
 scripts/age_model.pte
 scripts/gender_model.pte
+scripts/nsfw_model.pte

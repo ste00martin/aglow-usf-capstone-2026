@@ -35,6 +35,7 @@ import pako from "pako";
 const BLAZEFACE_MODEL = require("../../assets/models/blazeface.pte");
 const AGE_MODEL = require("../../assets/models/age_model.pte");
 const GENDER_MODEL = require("../../assets/models/gender_model.pte");
+const NSFW_MODEL = require("../../assets/models/nsfw_model.pte");
 
 // ── BlazeFace constants ───────────────────────────────────────────────────────
 const BLAZEFACE_INPUT_SIZE = 128;
@@ -47,6 +48,7 @@ const VIT_STD  = [0.229, 0.224, 0.225];
 // Label sets from HuggingFace model configs
 const AGE_LABELS    = ['0-2','3-9','10-19','20-29','30-39','40-49','50-59','60-69','more than 70'];
 const GENDER_LABELS = ['female','male'];
+const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
 const BLAZEFACE_NUM_ANCHORS = 896;
 const SCORE_THRESHOLD = 0.75;
 const NMS_IOU_THRESHOLD = 0.3;
@@ -58,6 +60,7 @@ type FaceResult = {
   bbox: BBox;
   age: { label: string; score: number };
   gender: { label: string; score: number };
+  nsfw: { label: string; score: number }[];
 };
 
 type ImageResult = {
@@ -276,6 +279,7 @@ async function imageUriToViTTensor(uri: string): Promise<Float32Array> {
     { format: ImageManipulator.SaveFormat.PNG, base64: true }
   );
   if (!resized.base64) throw new Error("imageUriToViTTensor: no base64 returned");
+  console.log("Resized image base64:", resized.uri);
 
   const binaryStr = atob(resized.base64);
   const pngBytes = new Uint8Array(binaryStr.length);
@@ -309,6 +313,28 @@ function topFromLogits(logits: Float32Array, labels: string[]): { label: string;
     if (probs[i] > probs[bestIdx]) bestIdx = i;
   }
   return { label: labels[bestIdx] ?? `class_${bestIdx}`, score: probs[bestIdx] };
+}
+
+/**
+ * Returns all labels + scores sorted descending.
+ */
+function allFromLogits(logits: Float32Array, labels: string[]): { label: string; score: number }[] {
+  // Softmax
+  const max = Math.max(...Array.from(logits));
+  const exps = Array.from(logits).map((v) => Math.exp(v - max));
+  const sum = exps.reduce((a, b) => a + b, 0);
+  const probs = exps.map((e) => e / sum);
+
+  // Combine labels and probabilities
+  const results = probs.map((score, idx) => ({
+    label: labels[idx] ?? `class_${idx}`,
+    score,
+  }));
+
+  // Sort descending by score
+  results.sort((a, b) => b.score - a.score);
+
+  return results;
 }
 
 // ── BlazeFace postprocessing ──────────────────────────────────────────────────
@@ -448,6 +474,7 @@ export default function AiScreen() {
   const faceDetector = useExecutorchModule({ modelSource: BLAZEFACE_MODEL });
   const ageModel     = useExecutorchModule({ modelSource: AGE_MODEL });
   const genderModel  = useExecutorchModule({ modelSource: GENDER_MODEL });
+  const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
 
   const isReady =
     faceDetector.isReady && ageModel.isReady && genderModel.isReady;
@@ -505,18 +532,29 @@ export default function AiScreen() {
               scalarType: ScalarType.FLOAT,
             };
 
-            const [ageOutputs, genderOutputs] = await Promise.all([
+            const nonCroppedVitTensor = await imageUriToViTTensor(photoUri);
+            const nonCroppedVitTensorPtr: TensorPtr = {
+              dataPtr: nonCroppedVitTensor,
+              sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],
+              scalarType: ScalarType.FLOAT,
+            };
+            
+
+            const [ageOutputs, genderOutputs, nsfwOutputs] = await Promise.all([
               ageModel.forward([vitTensorPtr]),
               genderModel.forward([vitTensorPtr]),
+              nsfwModel.forward([nonCroppedVitTensorPtr]),
             ]);
 
             const ageLogits    = new Float32Array(ageOutputs[0].dataPtr as ArrayBuffer);
             const genderLogits = new Float32Array(genderOutputs[0].dataPtr as ArrayBuffer);
+            const nsfwLogits   = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
 
             faces.push({
               bbox,
               age:    topFromLogits(ageLogits,    AGE_LABELS),
               gender: topFromLogits(genderLogits, GENDER_LABELS),
+              nsfw:   allFromLogits(nsfwLogits,   NSFW_LABELS),
             });
           }
 
@@ -553,6 +591,9 @@ export default function AiScreen() {
         )}
         {genderModel.error && (
           <Text style={styles.errorText}>Gender model: {String(genderModel.error)}</Text>
+        )}
+        {nsfwModel.error && (
+          <Text style={styles.errorText}>NSFW model: {String(nsfwModel.error)}</Text>
         )}
       </View>
     );
@@ -591,6 +632,9 @@ export default function AiScreen() {
                 <Text>
                   Gender: {face.gender.label} (
                   {(face.gender.score * 100).toFixed(1)}%)
+                </Text>
+                <Text>
+                  NSFW: {face.nsfw.map(n => `${n.label} (${(n.score*100).toFixed(1)}%)`).join(", ")}
                 </Text>
               </View>
             ))

@@ -17,6 +17,7 @@ Usage:
     # Output: nsfw_model.pte
 """
 
+import json
 import torch
 from transformers import AutoModelForImageClassification
 from torch.export import export
@@ -32,6 +33,7 @@ def main():
     model = AutoModelForImageClassification.from_pretrained(MODEL_ID)
     model.eval()
 
+    labels = []
     # Print labels if available
     if hasattr(model, "config") and hasattr(model.config, "id2label"):
         labels = [model.config.id2label[i] for i in range(len(model.config.id2label))]
@@ -73,9 +75,14 @@ def main():
     with open(output_path, "wb") as f:
         f.write(et_program.buffer)
 
+    labels_path = "nsfw_labels.json"
+    with open(labels_path, "w", encoding="utf-8") as f:
+        json.dump(labels, f, indent=2)
+
     print(f"\nSuccess! Saved: {output_path}")
+    print(f"Saved labels: {labels_path}")
     print("Next steps:")
-    print("  1. Copy nsfw_model.pte to expo-pytorch/assets/models/")
+    print("  1. Copy nsfw_model.pte and nsfw_labels.json to expo-pytorch/assets/models/")
 
 
 if __name__ == "__main__":

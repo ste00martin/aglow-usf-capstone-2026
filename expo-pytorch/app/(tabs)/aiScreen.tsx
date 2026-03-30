@@ -11,7 +11,8 @@
  *   1. Run scripts/export_blazeface.py → scripts/blazeface.pte
  *   2. Run scripts/export_age.py       → scripts/age_model.pte
  *   3. Run scripts/export_gender.py    → scripts/gender_model.pte
- *   4. Copy the three .pte files to expo-pytorch/assets/models/
+ *   4. Run scripts/export_nsfw.py      → scripts/nsfw_model.pte + scripts/nsfw_labels.json
+ *   5. Copy the .pte files and nsfw_labels.json to expo-pytorch/assets/models/
  */
 
 import {
@@ -36,6 +37,7 @@ const BLAZEFACE_MODEL = require("../../assets/models/blazeface.pte");
 const AGE_MODEL = require("../../assets/models/age_model.pte");
 const GENDER_MODEL = require("../../assets/models/gender_model.pte");
 const NSFW_MODEL = require("../../assets/models/nsfw_model.pte");
+const NSFW_LABELS = require("../../assets/models/nsfw_labels.json") as string[];
 
 // ── BlazeFace constants ───────────────────────────────────────────────────────
 const BLAZEFACE_INPUT_SIZE = 128;
@@ -48,24 +50,24 @@ const VIT_STD  = [0.229, 0.224, 0.225];
 // Label sets from HuggingFace model configs
 const AGE_LABELS    = ['0-2','3-9','10-19','20-29','30-39','40-49','50-59','60-69','more than 70'];
 const GENDER_LABELS = ['female','male'];
-const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
 const BLAZEFACE_NUM_ANCHORS = 896;
 const SCORE_THRESHOLD = 0.75;
 const NMS_IOU_THRESHOLD = 0.3;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type BBox = { ymin: number; xmin: number; ymax: number; xmax: number };
+type ClassificationResult = { label: string; score: number };
 
 type FaceResult = {
   bbox: BBox;
-  age: { label: string; score: number };
-  gender: { label: string; score: number };
-  nsfw: { label: string; score: number }[];
+  age: ClassificationResult;
+  gender: ClassificationResult;
 };
 
 type ImageResult = {
   uri: string;
   faces: FaceResult[];
+  nsfw: ClassificationResult[];
   error?: string;
 };
 
@@ -279,7 +281,6 @@ async function imageUriToViTTensor(uri: string): Promise<Float32Array> {
     { format: ImageManipulator.SaveFormat.PNG, base64: true }
   );
   if (!resized.base64) throw new Error("imageUriToViTTensor: no base64 returned");
-  console.log("Resized image base64:", resized.uri);
 
   const binaryStr = atob(resized.base64);
   const pngBytes = new Uint8Array(binaryStr.length);
@@ -335,6 +336,10 @@ function allFromLogits(logits: Float32Array, labels: string[]): { label: string;
   results.sort((a, b) => b.score - a.score);
 
   return results;
+}
+
+function formatClassificationResults(results: ClassificationResult[]): string {
+  return results.map((result) => `${result.label} (${(result.score * 100).toFixed(1)}%)`).join(", ");
 }
 
 // ── BlazeFace postprocessing ──────────────────────────────────────────────────
@@ -477,7 +482,7 @@ export default function AiScreen() {
   const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
 
   const isReady =
-    faceDetector.isReady && ageModel.isReady && genderModel.isReady;
+    faceDetector.isReady && ageModel.isReady && genderModel.isReady && nsfwModel.isReady;
 
   useEffect(() => {
     if (!isReady || assets.length === 0 || !isRunning) return;
@@ -490,6 +495,17 @@ export default function AiScreen() {
         console.log("Processing:", photoUri);
 
         try {
+          const imageTensor = await imageUriToViTTensor(photoUri);
+          const imageTensorPtr: TensorPtr = {
+            dataPtr: imageTensor,
+            sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],
+            scalarType: ScalarType.FLOAT,
+          };
+
+          const nsfwOutputs = await nsfwModel.forward([imageTensorPtr]);
+          const nsfwLogits = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
+          const nsfw = allFromLogits(nsfwLogits, NSFW_LABELS);
+
           // ── Step 1: BlazeFace detection ──────────────────────────────────
           const inputTensor = await imageUriToTensor(
             photoUri,
@@ -509,7 +525,7 @@ export default function AiScreen() {
           console.log("  BBoxes:", JSON.stringify(bboxes));
 
           if (bboxes.length === 0) {
-            results.push({ uri: photoUri, faces: [] });
+            results.push({ uri: photoUri, faces: [], nsfw });
             setImageResults([...results]);
             continue;
           }
@@ -532,36 +548,25 @@ export default function AiScreen() {
               scalarType: ScalarType.FLOAT,
             };
 
-            const nonCroppedVitTensor = await imageUriToViTTensor(photoUri);
-            const nonCroppedVitTensorPtr: TensorPtr = {
-              dataPtr: nonCroppedVitTensor,
-              sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],
-              scalarType: ScalarType.FLOAT,
-            };
-            
-
-            const [ageOutputs, genderOutputs, nsfwOutputs] = await Promise.all([
+            const [ageOutputs, genderOutputs] = await Promise.all([
               ageModel.forward([vitTensorPtr]),
               genderModel.forward([vitTensorPtr]),
-              nsfwModel.forward([nonCroppedVitTensorPtr]),
             ]);
 
             const ageLogits    = new Float32Array(ageOutputs[0].dataPtr as ArrayBuffer);
             const genderLogits = new Float32Array(genderOutputs[0].dataPtr as ArrayBuffer);
-            const nsfwLogits   = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
 
             faces.push({
               bbox,
               age:    topFromLogits(ageLogits,    AGE_LABELS),
               gender: topFromLogits(genderLogits, GENDER_LABELS),
-              nsfw:   allFromLogits(nsfwLogits,   NSFW_LABELS),
             });
           }
 
-          results.push({ uri: photoUri, faces });
+          results.push({ uri: photoUri, faces, nsfw });
         } catch (e) {
           console.error(`Error processing ${photoUri}:`, e);
-          results.push({ uri: photoUri, faces: [], error: String(e) });
+          results.push({ uri: photoUri, faces: [], nsfw: [], error: String(e) });
         }
 
         setImageResults([...results]);
@@ -573,7 +578,7 @@ export default function AiScreen() {
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (!isReady) {
-    const downloading = [faceDetector, ageModel, genderModel].find(
+    const downloading = [faceDetector, ageModel, genderModel, nsfwModel].find(
       (m) => m.downloadProgress < 1
     );
     return (
@@ -614,9 +619,10 @@ export default function AiScreen() {
   // ── Results ───────────────────────────────────────────────────────────────
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {imageResults.map(({ uri, faces, error }) => (
+      {imageResults.map(({ uri, faces, nsfw, error }) => (
         <View key={uri} style={styles.imageBlock}>
           <Image source={{ uri }} style={styles.image} resizeMode="contain" />
+          {nsfw.length > 0 && <Text>NSFW: {formatClassificationResults(nsfw)}</Text>}
 
           {error ? (
             <Text style={styles.errorText}>Error: {error}</Text>
@@ -632,9 +638,6 @@ export default function AiScreen() {
                 <Text>
                   Gender: {face.gender.label} (
                   {(face.gender.score * 100).toFixed(1)}%)
-                </Text>
-                <Text>
-                  NSFW: {face.nsfw.map(n => `${n.label} (${(n.score*100).toFixed(1)}%)`).join(", ")}
                 </Text>
               </View>
             ))

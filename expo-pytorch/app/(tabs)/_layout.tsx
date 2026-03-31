@@ -36,6 +36,18 @@ export default function TabLayout() {
           ),
         }}
       />
+
+      <Tabs.Screen 
+        name="videoupload" 
+        options={{ 
+          title: 'Video Upload',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'videocam': 'videocam-outline'} color={color} size={24}/>
+          ),
+        }}
+      />
     </Tabs>
+
+    
   );
 }

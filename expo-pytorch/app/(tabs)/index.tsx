@@ -3,6 +3,7 @@ import { Alert, Pressable, Image, ScrollView, Text, View, Linking, StyleSheet } 
 import { AlbumContext } from "../../AlbumContext";
 import { useContext } from "react";
 import { SaveFormat, useImageManipulator } from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 
 import * as MediaLibrary from 'expo-media-library';
 import * as ImageManipulator from 'expo-image-manipulator';

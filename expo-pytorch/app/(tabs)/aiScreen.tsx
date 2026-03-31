@@ -486,6 +486,10 @@ export default function AiScreen() {
       const results: ImageResult[] = [];
 
       for (const asset of assets) {
+        if (asset.mediaType !== "photo"){
+          console.log("Skipping non-photo asset: ", asset.uri);
+          continue;
+        }
         const photoUri = asset.uri;
         console.log("Processing:", photoUri);
 

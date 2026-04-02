@@ -7,6 +7,17 @@ VENV_DIR="$REPO_ROOT/.venv-executorch-export"
 REQUIREMENTS_FILE="$SCRIPT_DIR/requirements-executorch-export.txt"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 
+python_matches_requested_version() {
+  local python_bin="$1"
+
+  "$python_bin" - "$PYTHON_VERSION" <<'PY' >/dev/null 2>&1
+import sys
+
+requested = tuple(int(part) for part in sys.argv[1].split(".") if part)
+sys.exit(0 if requested and sys.version_info[: len(requested)] == requested else 1)
+PY
+}
+
 if [[ ! -f "$REQUIREMENTS_FILE" ]]; then
   echo "Missing requirements file: $REQUIREMENTS_FILE" >&2
   exit 1
@@ -22,10 +33,7 @@ if command -v uv >/dev/null 2>&1; then
 else
   if command -v "python$PYTHON_VERSION" >/dev/null 2>&1; then
     PYTHON_BIN="$(command -v "python$PYTHON_VERSION")"
-  elif command -v python3 >/dev/null 2>&1 && python3 - <<'PY' >/dev/null 2>&1
-import sys
-sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)
-PY
+  elif command -v python3 >/dev/null 2>&1 && python_matches_requested_version "$(command -v python3)"
   then
     PYTHON_BIN="$(command -v python3)"
   else
@@ -47,4 +55,5 @@ echo "  $VENV_DIR"
 echo
 echo "Next steps:"
 echo "  source $VENV_DIR/bin/activate"
-echo "  ./scripts/export_models_ios_coreml.sh"
+echo "  ./scripts/export_models_xnnpack.sh      # Android / CPU-safe default assets"
+echo "  ./scripts/export_models_ios_coreml.sh   # iOS CoreML companion assets"

@@ -18,7 +18,7 @@ mkdir -p "$ASSETS_DIR"
 
 cd "$SCRIPT_DIR"
 
-"$PYTHON_BIN" export_blazeface.py --backend coreml --output "$ASSETS_DIR/blazeface.pte"
-"$PYTHON_BIN" export_age.py --backend coreml --output "$ASSETS_DIR/age_model.pte"
-"$PYTHON_BIN" export_gender.py --backend coreml --output "$ASSETS_DIR/gender_model.pte"
-"$PYTHON_BIN" export_nsfw.py --backend coreml --output "$ASSETS_DIR/nsfw_model.pte"
+"$PYTHON_BIN" export_blazeface.py --backend coreml --output "$ASSETS_DIR/blazeface_coreml.pte"
+"$PYTHON_BIN" export_age.py --backend coreml --output "$ASSETS_DIR/age_model_coreml.pte"
+"$PYTHON_BIN" export_gender.py --backend coreml --output "$ASSETS_DIR/gender_model_coreml.pte"
+"$PYTHON_BIN" export_nsfw.py --backend coreml --output "$ASSETS_DIR/nsfw_model_coreml.pte"

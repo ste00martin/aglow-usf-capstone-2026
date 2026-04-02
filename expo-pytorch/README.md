@@ -53,8 +53,8 @@ For local model export, use the repo-level setup script to create a dedicated Py
 Then export whichever backend you need:
 
 ```bash
-./scripts/export_models_ios_coreml.sh
 ./scripts/export_models_xnnpack.sh
+./scripts/export_models_ios_coreml.sh
 ```
 
 Notes:
@@ -62,6 +62,8 @@ Notes:
 - CoreML export requires macOS and a compatible Python export environment.
 - The setup script creates `../.venv-executorch-export`, which is local-only and ignored by git.
 - The export scripts automatically use that local environment when it exists.
+- `export_models_xnnpack.sh` writes the shared `*.pte` assets used on Android and other non-iOS targets.
+- `export_models_ios_coreml.sh` writes parallel `*_coreml.pte` assets, and the app selects those on iOS.
 
 ## Join the community
 

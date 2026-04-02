@@ -1,73 +1,58 @@
-# Welcome to your Expo app 👋
+# expo-pytorch
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+This app uses Expo Router and `react-native-executorch` for on-device model inference.
 
-## Get started
+## Fresh clone setup
 
-1. Install dependencies
+Run these commands from the repo root:
+
+1. Install the Expo app dependencies:
 
    ```bash
+   cd expo-pytorch
    npm install
+   cd ..
    ```
 
-2. Start the app
+2. Create the local Python environment used to export the ExecuTorch models:
 
    ```bash
-   npx expo start
+   ./scripts/setup_executorch_export_env.sh
    ```
 
-In the output, you'll find options to open the app in a
+3. Export the standard XNNPACK model assets:
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+   ```bash
+   ./scripts/export_models_xnnpack.sh
+   ```
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+4. If you are running on iOS, also export the CoreML model assets:
 
-## Get a fresh project
+   ```bash
+   ./scripts/export_models_ios_coreml.sh
+   ```
 
-When you're ready, run:
+5. Start the iOS app:
 
-```bash
-npm run reset-project
-```
+   ```bash
+   cd expo-pytorch
+   npm run ios
+   ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Notes
 
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## ExecuTorch model export
-
-For local model export, use the repo-level setup script to create a dedicated Python export environment:
-
-```bash
-./scripts/setup_executorch_export_env.sh
-```
-
-Then export whichever backend you need:
-
-```bash
-./scripts/export_models_xnnpack.sh
-./scripts/export_models_ios_coreml.sh
-```
-
-Notes:
-
-- CoreML export requires macOS and a compatible Python export environment.
+- `npm run ios` is the intended local run command for this app.
+- `react-native-executorch` requires a native development build. Do not use Expo Go for this project.
+- CoreML export requires macOS.
 - The setup script creates `../.venv-executorch-export`, which is local-only and ignored by git.
-- The export scripts automatically use that local environment when it exists.
 - `export_models_xnnpack.sh` writes the shared `*.pte` assets used on Android and other non-iOS targets.
 - `export_models_ios_coreml.sh` writes parallel `*_coreml.pte` assets, and the app selects those on iOS.
 
-## Join the community
+## Alternative run commands
 
-Join our community of developers creating universal apps.
+For Android:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+cd expo-pytorch
+npm run android
+```

@@ -8,6 +8,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 export default function VideoUploadScreen() {
     // some code here.
     const [video, setVideo] = useState<string | null>(null);
+    const [frames, setFrames] = useState<string[]>([]); // array of asset uris for frames from video
 
     const pickVideo = async () => {
         const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -21,6 +22,7 @@ export default function VideoUploadScreen() {
             allowsEditing: true,
             aspect: [4, 3],
             quality: 1,
+            videoMaxDuration: 30, // limit to 30 seconds
         });
         
         if (!result.canceled) { // if we get something..

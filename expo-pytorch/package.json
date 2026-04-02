@@ -3,12 +3,18 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
+    "setup": "npm install && npm run models:export",
+    "setup:ios": "npm install && npm run models:export && npm run models:export:ios",
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "models:setup": "bash ../scripts/setup_executorch_export_env.sh",
+    "models:export": "bash ../scripts/export_models_xnnpack.sh",
+    "models:export:ios": "bash ../scripts/export_models_ios_coreml.sh",
+    "models:export:all": "npm run models:export && npm run models:export:ios"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

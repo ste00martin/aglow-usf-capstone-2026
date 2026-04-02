@@ -20,29 +20,22 @@ import {
   ScrollView,
   Image,
   Pressable,
-  Platform,
 } from "react-native";
 import { useState, useContext, useEffect } from "react";
 import { useExecutorchModule, ScalarType } from "react-native-executorch";
 import type { TensorPtr } from "react-native-executorch";
 import { AlbumContext } from "../../AlbumContext";
 import { imageUriToTensor, postprocessBlazeFace, cropFace, imageUriToViTTensor, topFromLogits, allFromLogits } from "../../aipreprocessing" // for type-only imports of BBox, etc.
+import {
+  BLAZEFACE_MODEL,
+  AGE_MODEL,
+  GENDER_MODEL,
+  NSFW_MODEL,
+} from "../../assets/models/executorchModels";
 
 // ── Model sources ─────────────────────────────────────────────────────────────
-// Keep XNNPACK as the shared default asset set and load the CoreML variants on iOS.
-const IS_IOS = Platform.OS === "ios";
-const BLAZEFACE_MODEL = IS_IOS
-  ? require("../../assets/models/blazeface_coreml.pte")
-  : require("../../assets/models/blazeface.pte");
-const AGE_MODEL = IS_IOS
-  ? require("../../assets/models/age_model_coreml.pte")
-  : require("../../assets/models/age_model.pte");
-const GENDER_MODEL = IS_IOS
-  ? require("../../assets/models/gender_model_coreml.pte")
-  : require("../../assets/models/gender_model.pte");
-const NSFW_MODEL = IS_IOS
-  ? require("../../assets/models/nsfw_model_coreml.pte")
-  : require("../../assets/models/nsfw_model.pte");
+// Platform-specific requires live in executorchModels.ios.ts vs executorchModels.ts so Metro
+// does not resolve missing sibling assets (e.g. XNNPACK .pte on iOS-only workflows).
 
 // ── BlazeFace constants ───────────────────────────────────────────────────────
 const BLAZEFACE_INPUT_SIZE = 128;

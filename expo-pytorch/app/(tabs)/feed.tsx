@@ -29,7 +29,7 @@ import {
   ViewToken,
   ActivityIndicator,
 } from 'react-native';
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -152,13 +152,41 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const [CARD_HEIGHT, setCardHeight] = useState(0);
 
-  const { startView, logInteraction, getLogPath, getLogs } = useInteractionLog();
+  const { startView, getViewDurationMs, logInteraction, getLogPath, getLogs } = useInteractionLog();
 
   const [reportTarget, setReportTarget] = useState<FeedItem | null>(null);
-  const [reportedIds, setReportedIds] = useState<Set<string>>(new Set());
 
   // Track current visible item for view-duration logging
   const currentItemRef = useRef<FeedItem | null>(null);
+  const reportedIdsRef = useRef<Set<string>>(new Set());
+
+  const getContentUri = useCallback((item: FeedItem): string => (
+    item.assetPath ?? item.kaggleId ?? String(item.uri)
+  ), []);
+
+  const flushCurrentItem = useCallback(async (restartView: boolean): Promise<void> => {
+    const currentItem = currentItemRef.current;
+    if (!currentItem) return;
+    const viewDurationMs = getViewDurationMs();
+    if (reportedIdsRef.current.has(currentItem.id)) {
+      if (restartView) {
+        startView();
+      }
+      return;
+    }
+
+    await logInteraction(currentItem.id, getContentUri(currentItem), 'skip', undefined, viewDurationMs);
+
+    if (restartView) {
+      startView();
+    }
+  }, [getContentUri, getViewDurationMs, logInteraction, startView]);
+
+  useEffect(() => {
+    return () => {
+      void flushCurrentItem(false);
+    };
+  }, [flushCurrentItem]);
 
   const handleViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -167,9 +195,7 @@ export default function FeedScreen() {
 
       // Log the item we just scrolled away from
       if (currentItemRef.current && currentItemRef.current.id !== newItem.id) {
-        logInteraction(currentItemRef.current.id, currentItemRef.current.kaggleId ?? String(currentItemRef.current.uri), 'skip');
-        // Note: logInteraction computes view duration from last startView() call
-        // 'skip' vs 'view' distinction is made inside computeReward based on duration
+        void flushCurrentItem(false);
       }
 
       currentItemRef.current = newItem;
@@ -189,8 +215,8 @@ export default function FeedScreen() {
   const handleReportSubmit = useCallback(async (category: ReportCategory) => {
     if (!reportTarget) return;
 
-    await logInteraction(reportTarget.id, reportTarget.kaggleId ?? String(reportTarget.uri), 'report', category);
-    setReportedIds((prev) => new Set(prev).add(reportTarget.id));
+    await logInteraction(reportTarget.id, getContentUri(reportTarget), 'report', category);
+    reportedIdsRef.current.add(reportTarget.id);
     setReportTarget(null);
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -199,9 +225,10 @@ export default function FeedScreen() {
       'Thanks — this helps fine-tune the content model.',
       [{ text: 'OK' }]
     );
-  }, [reportTarget, logInteraction]);
+  }, [getContentUri, logInteraction, reportTarget]);
 
   const handleExportLogs = useCallback(async () => {
+    await flushCurrentItem(true);
     const logs = await getLogs();
     if (logs.length === 0) {
       Alert.alert('No data yet', 'Scroll through some content first to generate interaction data.');
@@ -222,7 +249,7 @@ export default function FeedScreen() {
       },
       { text: 'Close', style: 'cancel' },
     ]);
-  }, [getLogs, getLogPath]);
+  }, [flushCurrentItem, getLogs, getLogPath]);
 
   const renderItem = useCallback(({ item }: { item: FeedItem }) => (
     <FeedCard

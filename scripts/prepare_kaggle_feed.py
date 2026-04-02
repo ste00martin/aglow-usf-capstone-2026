@@ -1,8 +1,8 @@
 """
 prepare_kaggle_feed.py
 ======================
-Download the Flickr8k dataset from Kaggle, pick a random subset of images,
-and write them as a feedData JSON file that the app can load.
+Download the Flickr8k dataset from Kaggle and generate feed files that the app
+can load.
 
 Flickr8k is a safe, widely-used dataset of 8,000 general-interest photos
 with captions — a good stand-in for a real social feed.
@@ -13,38 +13,80 @@ Setup
 2.  Get a Kaggle API token: https://www.kaggle.com/docs/api
     Place kaggle.json at ~/.kaggle/kaggle.json  (chmod 600)
 3.  Run: python scripts/prepare_kaggle_feed.py
+4.  Optional full local dataset:
+    python scripts/prepare_kaggle_feed.py --profile full --num-images 500
 
 Outputs
 -------
-expo-pytorch/data/kaggle_feed.json   — feed items JSON (import into feedData.ts)
-expo-pytorch/assets/feed/            — resized images bundled in the app
+starter profile:
+  expo-pytorch/data/kaggle_feed.json
+  expo-pytorch/data/kaggleFeedItems.ts
+  expo-pytorch/assets/feed/
 
-To use in the app, replace FEED_ITEMS in expo-pytorch/data/feedData.ts:
-  import kaggleFeed from './kaggle_feed.json';
-  export const FEED_ITEMS: FeedItem[] = kaggleFeed;
+full profile (local only, gitignored):
+  expo-pytorch/data/kaggle_feed.local.json
+  expo-pytorch/data/kaggleFeedItems.local.ts
+  expo-pytorch/assets/feed-local/
 """
 
-import os
+import argparse
 import json
 import random
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-KAGGLE_DATASET   = "adityajn105/flickr8k"
-NUM_IMAGES       = 50          # number of feed items to generate
-IMAGE_WIDTH      = 400
-IMAGE_HEIGHT     = 700
-RANDOM_SEED      = 42
+KAGGLE_DATASET      = "adityajn105/flickr8k"
+STARTER_NUM_IMAGES  = 24       # checked-in subset for the app feed
+FULL_NUM_IMAGES     = 500      # local default; use --num-images all for everything
+IMAGE_WIDTH         = 400
+IMAGE_HEIGHT        = 700
+RANDOM_SEED         = 42
 
-SCRIPT_DIR  = Path(__file__).parent
-REPO_ROOT   = SCRIPT_DIR.parent
+SCRIPT_DIR   = Path(__file__).parent
+REPO_ROOT    = SCRIPT_DIR.parent
 DOWNLOAD_DIR = SCRIPT_DIR / "_kaggle_flickr8k"
-OUTPUT_JSON  = REPO_ROOT / "expo-pytorch" / "data" / "kaggle_feed.json"
-OUTPUT_TS    = REPO_ROOT / "expo-pytorch" / "data" / "kaggleFeedItems.ts"
-OUTPUT_IMGS  = REPO_ROOT / "expo-pytorch" / "assets" / "feed"
+DATA_DIR     = REPO_ROOT / "expo-pytorch" / "data"
+ASSETS_DIR   = REPO_ROOT / "expo-pytorch" / "assets"
+
+
+@dataclass(frozen=True)
+class OutputProfile:
+    name: str
+    default_num_images: int
+    output_json: Path
+    output_ts: Path
+    output_imgs: Path
+    require_prefix: str
+    uri_prefix: str
+    asset_path_prefix: str
+
+
+PROFILES: dict[str, OutputProfile] = {
+    "starter": OutputProfile(
+        name="starter",
+        default_num_images=STARTER_NUM_IMAGES,
+        output_json=DATA_DIR / "kaggle_feed.json",
+        output_ts=DATA_DIR / "kaggleFeedItems.ts",
+        output_imgs=ASSETS_DIR / "feed",
+        require_prefix="../assets/feed",
+        uri_prefix="../../assets/feed",
+        asset_path_prefix="expo-pytorch/assets/feed",
+    ),
+    "full": OutputProfile(
+        name="full",
+        default_num_images=FULL_NUM_IMAGES,
+        output_json=DATA_DIR / "kaggle_feed.local.json",
+        output_ts=DATA_DIR / "kaggleFeedItems.local.ts",
+        output_imgs=ASSETS_DIR / "feed-local",
+        require_prefix="../assets/feed-local",
+        uri_prefix="../../assets/feed-local",
+        asset_path_prefix="expo-pytorch/assets/feed-local",
+    ),
+}
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -72,7 +114,10 @@ def find_captions(root: Path) -> dict[str, str]:
     captions: dict[str, str] = {}
 
     for candidate in root.rglob("*"):
-        if candidate.suffix in (".txt",) and "caption" in candidate.name.lower():
+        candidate_name = candidate.name.lower()
+        if candidate.suffix == ".txt" and (
+            "caption" in candidate_name or "token" in candidate_name
+        ):
             with open(candidate, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -127,9 +172,87 @@ def infer_tags(caption: str) -> list[str]:
     return found[:3] if found else ["photo"]
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Generate starter or full Kaggle feed assets for the Expo app."
+    )
+    parser.add_argument(
+        "--profile",
+        choices=sorted(PROFILES.keys()),
+        default="starter",
+        help="starter writes the checked-in subset; full writes local-only ignored outputs.",
+    )
+    parser.add_argument(
+        "--num-images",
+        default=None,
+        help="Number of images to generate, or 'all' to use the whole dataset.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=RANDOM_SEED,
+        help="Random seed for reproducible sampling.",
+    )
+    return parser.parse_args()
+
+
+def resolve_num_images(raw_value: str | None, profile: OutputProfile, available: int) -> int:
+    if raw_value is None:
+        return min(profile.default_num_images, available)
+    if raw_value.lower() == "all":
+        return available
+
+    value = int(raw_value)
+    if value <= 0:
+        raise ValueError("--num-images must be a positive integer or 'all'.")
+    return min(value, available)
+
+
+def reset_output_dir(output_dir: Path) -> None:
+    shutil.rmtree(output_dir, ignore_errors=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+
+def write_feed_outputs(profile: OutputProfile, feed_items: list[dict[str, Any]]) -> None:
+    profile.output_json.parent.mkdir(parents=True, exist_ok=True)
+    with open(profile.output_json, "w", encoding="utf-8") as f:
+        json.dump(feed_items, f, indent=2, ensure_ascii=False)
+
+    # Generate a TypeScript file with explicit require() calls so Metro can
+    # bundle the images as static assets (dynamic string paths don't work).
+    lines = [
+        "// Auto-generated by scripts/prepare_kaggle_feed.py — do not edit manually",
+        f"// Re-run: python scripts/prepare_kaggle_feed.py --profile {profile.name}",
+        "",
+        "import type { FeedItem } from './feedData';",
+        "",
+        "export const KAGGLE_FEED_ITEMS: FeedItem[] = [",
+    ]
+    for item in feed_items:
+        dst_name = Path(item["uri"]).name
+        caption_escaped = item["caption"].replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+        tags_json = json.dumps(item["tags"])
+        lines.append("  {")
+        lines.append(f"    id: '{item['id']}',")
+        lines.append(f"    uri: require('{profile.require_prefix}/{dst_name}'),")
+        lines.append(f"    assetPath: '{item['assetPath']}',")
+        lines.append(f"    caption: `{caption_escaped}`,")
+        lines.append(f"    tags: {tags_json},")
+        lines.append("    source: 'kaggle',")
+        lines.append(f"    kaggleId: '{item['kaggleId']}',")
+        lines.append("  },")
+    lines.append("];")
+
+    with open(profile.output_ts, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    args = parse_args()
+    profile = PROFILES[args.profile]
+
     if not DOWNLOAD_DIR.exists() or not any(DOWNLOAD_DIR.iterdir()):
         download_dataset()
     else:
@@ -141,17 +264,18 @@ def main() -> None:
         raise RuntimeError("No images found — check the download directory.")
 
     captions = find_captions(DOWNLOAD_DIR)
+    num_images = resolve_num_images(args.num_images, profile, len(images))
 
-    random.seed(RANDOM_SEED)
-    selected = random.sample(images, min(NUM_IMAGES, len(images)))
+    random.seed(args.seed)
+    selected = random.sample(images, num_images)
 
-    OUTPUT_IMGS.mkdir(parents=True, exist_ok=True)
+    reset_output_dir(profile.output_imgs)
 
     feed_items: list[dict[str, Any]] = []
     for i, src in enumerate(selected):
         item_id = str(i + 1)
         dst_name = f"feed_{i + 1:03d}.jpg"
-        dst = OUTPUT_IMGS / dst_name
+        dst = profile.output_imgs / dst_name
 
         ok = resize_image(src, dst, IMAGE_WIDTH, IMAGE_HEIGHT)
         if not ok:
@@ -162,47 +286,20 @@ def main() -> None:
 
         feed_items.append({
             "id":       item_id,
-            "uri":      f"../../assets/feed/{dst_name}",   # relative from data/
+            "uri":      f"{profile.uri_prefix}/{dst_name}",
+            "assetPath": f"{profile.asset_path_prefix}/{dst_name}",
             "caption":  caption or src.stem.replace("_", " "),
             "tags":     tags,
             "source":   "kaggle",
             "kaggleId": src.name,
         })
 
-    OUTPUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(feed_items, f, indent=2, ensure_ascii=False)
+    write_feed_outputs(profile, feed_items)
 
-    # Generate a TypeScript file with explicit require() calls so Metro can
-    # bundle the images as static assets (dynamic string paths don't work).
-    lines = [
-        "// Auto-generated by scripts/prepare_kaggle_feed.py — do not edit manually",
-        "// Re-run: python scripts/prepare_kaggle_feed.py",
-        "",
-        "import type { FeedItem } from './feedData';",
-        "",
-        "export const KAGGLE_FEED_ITEMS: FeedItem[] = [",
-    ]
-    for item in feed_items:
-        dst_name = Path(item["uri"]).name
-        caption_escaped = item["caption"].replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
-        tags_json = json.dumps(item["tags"])
-        lines.append(f"  {{")
-        lines.append(f"    id: '{item['id']}',")
-        lines.append(f"    uri: require('../assets/feed/{dst_name}'),")
-        lines.append(f"    caption: `{caption_escaped}`,")
-        lines.append(f"    tags: {tags_json},")
-        lines.append(f"    source: 'kaggle',")
-        lines.append(f"    kaggleId: '{item['kaggleId']}',")
-        lines.append(f"  }},")
-    lines.append("];")
-
-    with open(OUTPUT_TS, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-
-    print(f"\nWrote {len(feed_items)} items → {OUTPUT_JSON}")
-    print(f"Generated TypeScript → {OUTPUT_TS}")
-    print(f"Images → {OUTPUT_IMGS}/")
+    print(f"\nProfile: {profile.name}")
+    print(f"Wrote {len(feed_items)} items → {profile.output_json}")
+    print(f"Generated TypeScript → {profile.output_ts}")
+    print(f"Images → {profile.output_imgs}/")
 
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ Requirements
 from __future__ import annotations
 
 import json
-import math
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +57,14 @@ from PIL import Image
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 LOG_PATH       = Path("logs/interaction_log.jsonl")
-IMAGE_ROOT     = Path("expo-pytorch/assets/feed")   # where Kaggle images live
+IMAGE_ROOTS    = (
+    Path("expo-pytorch/assets/feed"),
+    Path("expo-pytorch/assets/feed-local"),
+)
+FEED_METADATA_PATHS = (
+    Path("expo-pytorch/data/kaggle_feed.json"),
+    Path("expo-pytorch/data/kaggle_feed.local.json"),
+)
 OUTPUT_DIR     = Path("models")
 OUTPUT_WEIGHTS = OUTPUT_DIR / "nsfw_finetuned.pt"
 
@@ -88,6 +95,33 @@ def load_interactions(log_path: Path) -> list[dict[str, Any]]:
                 interactions.append(json.loads(line))
     print(f"Loaded {len(interactions)} interactions from {log_path}")
     return interactions
+
+
+@lru_cache(maxsize=1)
+def load_feed_aliases() -> dict[str, Path]:
+    aliases: dict[str, Path] = {}
+
+    for metadata_path in FEED_METADATA_PATHS:
+        if not metadata_path.exists():
+            continue
+
+        with open(metadata_path, encoding="utf-8") as f:
+            items = json.load(f)
+
+        for item in items:
+            resolved = _asset_path_from_metadata(item)
+            if resolved is None:
+                continue
+
+            for key in (
+                item.get("assetPath"),
+                item.get("kaggleId"),
+                item.get("uri"),
+            ):
+                if key:
+                    aliases[str(key)] = resolved
+
+    return aliases
 
 
 def interactions_to_examples(
@@ -128,7 +162,7 @@ def interactions_to_examples(
             else:
                 label = report_idx
 
-        elif action == "view" and reward > 0:
+        elif _is_positive_view(item):
             label = safe_idx  # long view of content = implicitly safe
         else:
             continue  # skip or neutral — don't add supervised signal
@@ -150,15 +184,60 @@ def interactions_to_examples(
     return examples
 
 
+def _is_positive_view(item: dict[str, Any]) -> bool:
+    action = str(item.get("action", ""))
+    reward = float(item.get("reward", 0.0))
+    view_duration_ms = int(item.get("viewDurationMs", 0) or 0)
+
+    if action == "view" and reward > 0:
+        return True
+
+    # Backward compatibility for older logs that kept the action as "skip"
+    # even when the reward reflected a long watch.
+    return action == "skip" and reward > 0 and view_duration_ms >= 2_000
+
+
+def _asset_path_from_metadata(item: dict[str, Any]) -> Path | None:
+    asset_path = item.get("assetPath")
+    if asset_path:
+        candidate = Path(str(asset_path))
+        if candidate.exists():
+            return candidate
+
+    uri = str(item.get("uri", ""))
+    assets_index = uri.find("assets/")
+    if assets_index == -1:
+        return None
+
+    candidate = Path("expo-pytorch") / uri[assets_index:]
+    return candidate if candidate.exists() else None
+
+
 def _resolve_image_path(uri: str) -> Path | None:
     """Map a contentUri (remote URL or local file path) to a local Path."""
+    aliases = load_feed_aliases()
+    if uri in aliases:
+        return aliases[uri]
+
     if uri.startswith("file://"):
         p = Path(uri.removeprefix("file://"))
         return p if p.exists() else None
     if uri.startswith("https://picsum.photos"):
         return None  # can't use remote URLs as training data
-    # Relative path (from kaggle_feed.json)
-    for base in [IMAGE_ROOT, Path(".")]:
+
+    direct = Path(uri)
+    if direct.exists():
+        return direct
+
+    basename = Path(uri).name
+    if basename:
+        for root in IMAGE_ROOTS:
+            candidate = root / basename
+            if candidate.exists():
+                return candidate
+
+    # Relative path from exported feed metadata or repo root.
+    for base in [Path("."), *IMAGE_ROOTS]:
         p = base / uri.lstrip("./")
         if p.exists():
             return p
@@ -312,6 +391,9 @@ def main() -> None:
     print(f"Log: {LOG_PATH}")
 
     interactions = load_interactions(LOG_PATH)
+    if not interactions:
+        print("\nNo interactions found yet. Add some feed usage, export the log again, and rerun.")
+        return
 
     # Print reward distribution
     rewards = [i["reward"] for i in interactions]

@@ -50,10 +50,35 @@ scripts/age_model.pte
 scripts/gender_model.pte
 scripts/nsfw_model.pte
 
-# Kaggle feed — generated assets (re-run scripts/prepare_kaggle_feed.py)
-expo-pytorch/assets/feed/
-expo-pytorch/data/kaggle_feed.json
-expo-pytorch/data/kaggleFeedItems.ts
+# Kaggle feed — keep a small checked-in subset, ignore the rest
+expo-pytorch/assets/feed/*
+!expo-pytorch/assets/feed/feed_001.jpg
+!expo-pytorch/assets/feed/feed_002.jpg
+!expo-pytorch/assets/feed/feed_003.jpg
+!expo-pytorch/assets/feed/feed_004.jpg
+!expo-pytorch/assets/feed/feed_005.jpg
+!expo-pytorch/assets/feed/feed_006.jpg
+!expo-pytorch/assets/feed/feed_007.jpg
+!expo-pytorch/assets/feed/feed_008.jpg
+!expo-pytorch/assets/feed/feed_009.jpg
+!expo-pytorch/assets/feed/feed_010.jpg
+!expo-pytorch/assets/feed/feed_011.jpg
+!expo-pytorch/assets/feed/feed_012.jpg
+!expo-pytorch/assets/feed/feed_013.jpg
+!expo-pytorch/assets/feed/feed_014.jpg
+!expo-pytorch/assets/feed/feed_015.jpg
+!expo-pytorch/assets/feed/feed_016.jpg
+!expo-pytorch/assets/feed/feed_017.jpg
+!expo-pytorch/assets/feed/feed_018.jpg
+!expo-pytorch/assets/feed/feed_019.jpg
+!expo-pytorch/assets/feed/feed_020.jpg
+!expo-pytorch/assets/feed/feed_021.jpg
+!expo-pytorch/assets/feed/feed_022.jpg
+!expo-pytorch/assets/feed/feed_023.jpg
+!expo-pytorch/assets/feed/feed_024.jpg
+expo-pytorch/assets/feed-local/
+expo-pytorch/data/kaggle_feed.local.json
+expo-pytorch/data/kaggleFeedItems.local.ts
 scripts/_kaggle_flickr8k/
 
 # API keys & credentials

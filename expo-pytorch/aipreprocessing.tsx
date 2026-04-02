@@ -10,7 +10,7 @@ const VIT_INPUT_SIZE = 224;
 // ImageNet normalization: mean and std per channel
 const VIT_MEAN = [0.485, 0.456, 0.406];
 const VIT_STD  = [0.229, 0.224, 0.225];
-// Label sets from HuggingFace model configs
+// Label sets from HuggingFace model configsc
 const BLAZEFACE_NUM_ANCHORS = 896;
 const SCORE_THRESHOLD = 0.75;
 const NMS_IOU_THRESHOLD = 0.3;

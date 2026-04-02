@@ -1,16 +1,17 @@
 import { Stack } from "expo-router";
-import { AlbumContext } from "../AlbumContext";
-import * as MediaLibrary from "expo-media-library";
-import { useState } from "react";
-
+import { WorkflowProvider } from "../AlbumContext";
+import { workflowTheme } from "@/components/workflow/theme";
 
 export default function RootLayout() {
-  const [assets, setAssets] = useState<MediaLibrary.Asset[]>([])
-  return(
-    <AlbumContext.Provider value={{ assets, setAssets}}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options ={{headerShown:false}}/>
+  return (
+    <WorkflowProvider>
+      <Stack screenOptions={{ contentStyle: { backgroundColor: workflowTheme.background }, headerShown: false }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="review" />
+        <Stack.Screen name="processing" />
+        <Stack.Screen name="results" />
+        <Stack.Screen name="result/[assetId]" />
       </Stack>
-    </AlbumContext.Provider>
+    </WorkflowProvider>
   );
 }

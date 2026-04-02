@@ -17,8 +17,9 @@ const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_nor
 const VIT_INPUT_SIZE = 224;
 
 type ImageResult = {
+    timestamp: number;
     uri: string;
-    nsfw: { label: string; score: number };
+    nsfw: { label: string; score: number }[];
 };
 
 export default function VideoUploadScreen() {
@@ -45,11 +46,14 @@ export default function VideoUploadScreen() {
         
         if (!result.canceled) { // if we get something..
             const selectedUri = result.assets[0].uri;
+            const duration = result.assets[0].duration ?? 30000;
+
+            console.log("Duration: " + duration);
 
             const thumbnails: ImageResult[] = [];
 
             setVideo(result.assets[0].uri); // always chooses the first video
-            for (let time = 0; time < VIDEO_MAX_DURATION * 1000; time += FRAME_INTERVAL) {
+            for (let time = 0; time < duration; time += FRAME_INTERVAL) {
                 const { uri: thumbnail } = await VideoThumbnails.getThumbnailAsync(selectedUri, { time: time });
                 setFrames(prev => [...prev, thumbnail]);
                 
@@ -68,8 +72,9 @@ export default function VideoUploadScreen() {
                 const nsfwLogits   = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
 
                 thumbnails.push({
+                    timestamp: time,
                     uri: thumbnail,
-                    nsfw: topFromLogits(nsfwLogits, NSFW_LABELS),
+                    nsfw: allFromLogits(nsfwLogits, NSFW_LABELS),
                 })
             }
             setThumbnails([...thumbnails])
@@ -80,32 +85,40 @@ export default function VideoUploadScreen() {
     );
 
     return (
-        <ScrollView contentContainerStyle={styles.container}>
-    <Pressable style={styles.buttonContainer} onPress={pickVideo}>
-      <Text style={styles.button}>Upload a Video.</Text>
-    </Pressable>                
-
-    <VideoView
-      player={player}
-      style={styles.video}
-      nativeControls
-      contentFit="contain"
-    />
-
-    {thumbnails.map((item, index) => (
-      <View key={index} style={{ marginVertical: 12, alignItems: 'center' }}>
-        <Image
-          source={{ uri: item.uri }}
-          style={{ width: 200, height: 120 }}
-        />
-
-        <Text>
-          NSFW: {item.nsfw.label} ({(item.nsfw.score * 100).toFixed(1)}%)
-        </Text>
-      </View>
-    ))}
-    </ScrollView>
-    );
+        <View style={{ flex: 1 }}>
+          <ScrollView
+            contentContainerStyle={styles.container}
+            showsVerticalScrollIndicator={true}
+          >
+            <Pressable style={styles.buttonContainer} onPress={pickVideo}>
+              <Text style={styles.button}>Upload a Video.</Text>
+            </Pressable>                
+      
+            <VideoView
+              player={player}
+              style={styles.video}
+              nativeControls
+              contentFit="contain"
+            />
+      
+            {thumbnails.map((item, index) => (
+              <View key={index} style={{ marginVertical: 12, alignItems: 'center' }}>
+                <Text>
+                    Timestamp: {item.timestamp} ms
+                </Text>
+                <Image
+                  source={{ uri: item.uri }}
+                  style={{ width: 200, height: 120 }}
+                />
+      
+                <Text>
+                    NSFW: {item.nsfw.map(n => `${n.label} (${(n.score * 100).toFixed(1)}%)`).join(", ")}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      );
 }
 
 
@@ -124,9 +137,8 @@ const styles = StyleSheet.create({
     },
 
     container: {
-        flex: 1,
         alignItems: 'center',
-        justifyContent: 'center',
+        paddingVertical: 20,
     },
     image: {
         width: 200,

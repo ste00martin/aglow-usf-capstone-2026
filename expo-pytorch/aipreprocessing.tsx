@@ -101,7 +101,7 @@ export function decodePNG(
       pngBytes[offset + 3]
     );
     offset += 4;
-    const data = pngBytes.slice(offset, offset + length);
+    const data = pngBytes.subarray(offset, offset + length);
     offset += length + 4; // +4 for CRC
 
     if (type === "IHDR") {
@@ -136,7 +136,7 @@ export function decodePNG(
   for (let y = 0; y < height; y++) {
     const rowStart = y * (rowBytes + 1);
     const filterType = raw[rowStart];
-    const rowData = raw.slice(rowStart + 1, rowStart + 1 + rowBytes);
+    const rowData = raw.subarray(rowStart + 1, rowStart + 1 + rowBytes);
     const outRow = pixels.subarray(y * rowBytes, (y + 1) * rowBytes);
     const prevRowSlice =
       y > 0 ? pixels.subarray((y - 1) * rowBytes, y * rowBytes) : prevRow;
@@ -199,7 +199,6 @@ export async function imageUriToViTTensor(uri: string): Promise<Float32Array> {
     { format: ImageManipulator.SaveFormat.PNG, base64: true }
   );
   if (!resized.base64) throw new Error("imageUriToViTTensor: no base64 returned");
-  console.log("Resized image base64:", resized.uri);
 
   const binaryStr = atob(resized.base64);
   const pngBytes = new Uint8Array(binaryStr.length);
@@ -222,33 +221,52 @@ export async function imageUriToViTTensor(uri: string): Promise<Float32Array> {
  * Run softmax on raw logits and return top-1 label + score.
  */
 export function topFromLogits(logits: Float32Array, labels: string[]): { label: string; score: number } {
-  // Softmax
-  const max = Math.max(...Array.from(logits));
-  const exps = Array.from(logits).map((v) => Math.exp(v - max));
-  const sum  = exps.reduce((a, b) => a + b, 0);
-  const probs = exps.map((e) => e / sum);
+  let max = logits[0] ?? 0;
+  for (let i = 1; i < logits.length; i++) {
+    if (logits[i] > max) max = logits[i];
+  }
+
+  const exps = new Float32Array(logits.length);
+  let sum = 0;
+  for (let i = 0; i < logits.length; i++) {
+    const exp = Math.exp(logits[i] - max);
+    exps[i] = exp;
+    sum += exp;
+  }
 
   let bestIdx = 0;
-  for (let i = 1; i < probs.length; i++) {
-    if (probs[i] > probs[bestIdx]) bestIdx = i;
+  let bestScore = exps[0] / sum;
+  for (let i = 1; i < exps.length; i++) {
+    const score = exps[i] / sum;
+    if (score > bestScore) {
+      bestIdx = i;
+      bestScore = score;
+    }
   }
-  return { label: labels[bestIdx] ?? `class_${bestIdx}`, score: probs[bestIdx] };
+
+  return { label: labels[bestIdx] ?? `class_${bestIdx}`, score: bestScore };
 }
 
 /**
  * Returns all labels + scores sorted descending.
  */
 export function allFromLogits(logits: Float32Array, labels: string[]): { label: string; score: number }[] {
-  // Softmax
-  const max = Math.max(...Array.from(logits));
-  const exps = Array.from(logits).map((v) => Math.exp(v - max));
-  const sum = exps.reduce((a, b) => a + b, 0);
-  const probs = exps.map((e) => e / sum);
+  let max = logits[0] ?? 0;
+  for (let i = 1; i < logits.length; i++) {
+    if (logits[i] > max) max = logits[i];
+  }
 
-  // Combine labels and probabilities
-  const results = probs.map((score, idx) => ({
+  const exps = new Float32Array(logits.length);
+  let sum = 0;
+  for (let i = 0; i < logits.length; i++) {
+    const exp = Math.exp(logits[i] - max);
+    exps[i] = exp;
+    sum += exp;
+  }
+
+  const results = Array.from({ length: logits.length }, (_, idx) => ({
     label: labels[idx] ?? `class_${idx}`,
-    score,
+    score: exps[idx] / sum,
   }));
 
   // Sort descending by score
@@ -335,23 +353,29 @@ export function postprocessBlazeFace(outputs: TensorPtr[]): BBox[] {
   const rawBoxes  = new Float32Array(outputs[0].dataPtr as ArrayBuffer); // [896 * 16]
   const rawScores = new Float32Array(outputs[1].dataPtr as ArrayBuffer); // [896]
 
-  // Filter by score threshold
-  const scores: number[] = [];
-  const candidates: number[] = [];
+  const candidateBoxes: number[][] = [];
+  const candidateScores: number[] = [];
   for (let i = 0; i < BLAZEFACE_NUM_ANCHORS; i++) {
     const score = sigmoid(rawScores[i]);
-    if (score >= SCORE_THRESHOLD) {
-      scores.push(score);
-      candidates.push(i);
-    }
+    if (score < SCORE_THRESHOLD) continue;
+
+    const [anchorCx, anchorCy, anchorW, anchorH] = ANCHORS[i];
+    const boxOffset = i * 16;
+    const xCenter = rawBoxes[boxOffset] / BLAZEFACE_INPUT_SIZE * anchorW + anchorCx;
+    const yCenter = rawBoxes[boxOffset + 1] / BLAZEFACE_INPUT_SIZE * anchorH + anchorCy;
+    const w = rawBoxes[boxOffset + 2] / BLAZEFACE_INPUT_SIZE * anchorW;
+    const h = rawBoxes[boxOffset + 3] / BLAZEFACE_INPUT_SIZE * anchorH;
+
+    candidateBoxes.push([
+      yCenter - h / 2,
+      xCenter - w / 2,
+      yCenter + h / 2,
+      xCenter + w / 2,
+    ]);
+    candidateScores.push(score);
   }
 
-  if (candidates.length === 0) return [];
-
-  // Decode all candidate boxes
-  const allBoxes = decodeBoxes(rawBoxes, ANCHORS);
-  const candidateBoxes = candidates.map((i) => allBoxes[i]);
-  const candidateScores = candidates.map((i) => sigmoid(rawScores[i]));
+  if (candidateBoxes.length === 0) return [];
 
   // NMS
   const kept = nms(candidateBoxes, candidateScores, NMS_IOU_THRESHOLD);

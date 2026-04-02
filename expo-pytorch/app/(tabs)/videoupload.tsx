@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Pressable, Image, ScrollView, Text, View, Linking, StyleSheet, Button} from "react-native";
+import { Alert, Pressable, Image, ScrollView, Text, View, Linking, StyleSheet, Button } from "react-native";
 import { AlbumContext } from "../../AlbumContext";
 import { useContext } from "react";
 import * as ImagePicker from 'expo-image-picker';
@@ -8,10 +8,10 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useExecutorchModule, ScalarType } from "react-native-executorch";
 import type { TensorPtr } from "react-native-executorch";
 import { imageUriToTensor, postprocessBlazeFace, cropFace, imageUriToViTTensor, topFromLogits, allFromLogits } from "../../aipreprocessing"
+import { NSFW_MODEL } from "../../assets/models/executorchModels";
 
 const VIDEO_MAX_DURATION = 30; // seconds
 const FRAME_INTERVAL = 5000; // milliseconds between frames to extract
-const NSFW_MODEL = require("../../assets/models/nsfw_model.pte");
 const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
 
 const VIT_INPUT_SIZE = 224;

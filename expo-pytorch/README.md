@@ -1,50 +1,55 @@
-# Welcome to your Expo app 👋
+# expo-pytorch
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+This app uses Expo Router and `react-native-executorch` for on-device model inference.
 
-## Get started
+## Quick start
 
-1. Install dependencies
+Run these commands from `expo-pytorch/`:
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
+1. Set up the app for your target platform:
 
    ```bash
-   npx expo start
+   cd expo-pytorch
+   npm run setup
    ```
 
-In the output, you'll find options to open the app in a
+   For iOS development, run this instead:
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+   ```bash
+   npm run setup:ios
+   ```
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+2. Start the native app:
 
-## Get a fresh project
+   ```bash
+   npm run ios
+   ```
 
-When you're ready, run:
+   Or for Android:
+
+   ```bash
+   npm run android
+   ```
+
+## Notes
+
+- `npm run setup` installs JS dependencies and exports the shared XNNPACK `*.pte` assets used on Android and other non-iOS targets.
+- `npm run setup:ios` does the same and also exports the iOS CoreML `*_coreml.pte` assets.
+- `npm run ios` is the intended local run command for this app.
+- `react-native-executorch` requires a native development build. Do not use Expo Go for this project.
+- CoreML export requires macOS.
+- The setup script creates `../.venv-executorch-export`, which is local-only and ignored by git.
+- First-time export needs network access once to pull `blazeface.py`, `blazeface.pth`, and `anchors.npy` from [BlazeFace-PyTorch](https://github.com/hollance/BlazeFace-PyTorch). The setup/export commands fetch them automatically.
+
+## Advanced commands
+
+If you want the lower-level steps explicitly:
 
 ```bash
-npm run reset-project
+npm run models:setup
+npm run models:export
+npm run models:export:ios
+npm run models:export:all
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Those commands call the repo-root shell scripts in `../scripts/`. The export scripts automatically bootstrap the Python environment if it does not exist yet.

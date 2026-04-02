@@ -7,6 +7,7 @@ and postprocessing (anchor decode + NMS) run in JavaScript on the app side.
 Prerequisites:
     pip install torch torchvision
     pip install executorch  # follow https://pytorch.org/executorch/stable/getting-started.html
+    # For iOS/CoreML export on macOS, also install ExecuTorch CoreML requirements
 
 Files required in scripts/:
     blazeface.py     — BlazeFace class (download from hollance/BlazeFace-PyTorch)
@@ -20,8 +21,10 @@ Outputs:
 Usage:
     cd scripts/
     python export_blazeface.py
+    python export_blazeface.py --backend coreml
 """
 
+import argparse
 import sys
 import json
 import torch
@@ -37,8 +40,12 @@ except ImportError:
     sys.exit(1)
 
 from torch.export import export
-from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
-from executorch.exir import to_edge
+
+from executorch_export_utils import (
+    lower_to_executorch,
+    resolve_output_path,
+    write_program,
+)
 
 
 class BlazeFaceExportWrapper(torch.nn.Module):
@@ -72,7 +79,25 @@ def export_anchors(anchors_path: str, output_path: str) -> None:
     print(f"Anchors saved: {output_path}  (shape: {anchors.shape})")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--backend",
+        choices=("xnnpack", "coreml"),
+        default="xnnpack",
+        help="ExecuTorch backend to target. Use coreml for iOS-specific export.",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Optional output path. Defaults to blazeface.pte for xnnpack and blazeface_coreml.pte for coreml.",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+
     # ── Load model ──────────────────────────────────────────────────────────────
     print("Loading BlazeFace...")
     detector = BlazeFace()
@@ -108,18 +133,15 @@ def main():
     print("Exporting to ExecuTorch...")
     exported_program = export(wrapper, (example_input,))
 
-    print("Applying XNNPACK backend...")
-    edge_manager = to_edge(exported_program)
-    edge_manager = edge_manager.to_backend(XnnpackPartitioner())
-    et_program = edge_manager.to_executorch()
+    print(f"Applying {args.backend.upper()} backend...")
+    et_program = lower_to_executorch(exported_program, args.backend)
 
-    output_path = "blazeface.pte"
-    with open(output_path, "wb") as f:
-        f.write(et_program.buffer)
+    output_path = resolve_output_path("blazeface.pte", args.backend, args.output)
+    write_program(et_program, output_path)
 
     print(f"\nSuccess! Saved: {output_path}")
     print("Next steps:")
-    print("  1. Copy blazeface.pte and anchors.json to expo-pytorch/assets/models/")
+    print("  1. Copy the exported .pte and anchors.json to expo-pytorch/assets/models/")
     print("  2. Run export_age.py and export_gender.py")
 
 

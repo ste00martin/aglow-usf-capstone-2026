@@ -10,24 +10,50 @@ Prerequisites:
     pip install torch torchvision
     pip install transformers
     pip install executorch
+    # For iOS/CoreML export on macOS, also install ExecuTorch CoreML requirements
 
 Usage:
     cd scripts/
     python export_gender.py
     # Output: gender_model.pte
+    python export_gender.py --backend coreml
+    # Output: gender_model_coreml.pte
 """
 
+import argparse
 import torch
 from transformers import AutoModelForImageClassification
 from torch.export import export
-from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
-from executorch.exir import to_edge
+
+from executorch_export_utils import (
+    lower_to_executorch,
+    resolve_output_path,
+    write_program,
+)
 
 
 MODEL_ID = "rizvandwiki/gender-classification"
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--backend",
+        choices=("xnnpack", "coreml"),
+        default="xnnpack",
+        help="ExecuTorch backend to target. Use coreml for iOS-specific export.",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Optional output path. Defaults to gender_model.pte for xnnpack and gender_model_coreml.pte for coreml.",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+
     print(f"Loading {MODEL_ID} from HuggingFace...")
     model = AutoModelForImageClassification.from_pretrained(MODEL_ID)
     model.eval()
@@ -56,14 +82,11 @@ def main():
     print("Exporting to ExecuTorch...")
     exported_program = export(wrapper, (example_input,))
 
-    print("Applying XNNPACK backend...")
-    edge_manager = to_edge(exported_program)
-    edge_manager = edge_manager.to_backend(XnnpackPartitioner())
-    et_program = edge_manager.to_executorch()
+    print(f"Applying {args.backend.upper()} backend...")
+    et_program = lower_to_executorch(exported_program, args.backend)
 
-    output_path = "gender_model.pte"
-    with open(output_path, "wb") as f:
-        f.write(et_program.buffer)
+    output_path = resolve_output_path("gender_model.pte", args.backend, args.output)
+    write_program(et_program, output_path)
 
     print(f"\nSuccess! Saved: {output_path}")
     print("Next steps:")

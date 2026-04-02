@@ -8,10 +8,9 @@
  *   4. Gender classifier (.pte) runs on each crop    [useExecutorchModule + ViT preprocessing]
  *
  * SETUP:
- *   1. Run scripts/export_blazeface.py → scripts/blazeface.pte
- *   2. Run scripts/export_age.py       → scripts/age_model.pte
- *   3. Run scripts/export_gender.py    → scripts/gender_model.pte
- *   4. Copy the three .pte files to expo-pytorch/assets/models/
+ *   1. For iOS/CoreML, run scripts/export_models_ios_coreml.sh
+ *   2. For XNNPACK/CPU, run scripts/export_models_xnnpack.sh
+ *   3. The scripts write the expected .pte files into assets/models/
  */
 
 import {
@@ -76,7 +75,10 @@ export default function AiScreen() {
   const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
 
   const isReady =
-    faceDetector.isReady && ageModel.isReady && genderModel.isReady;
+    faceDetector.isReady &&
+    ageModel.isReady &&
+    genderModel.isReady &&
+    nsfwModel.isReady;
 
   useEffect(() => {
     if (!isReady || assets.length === 0 || !isRunning) return;
@@ -86,11 +88,9 @@ export default function AiScreen() {
 
       for (const asset of assets) {
         if (asset.mediaType !== "photo"){
-          console.log("Skipping non-photo asset: ", asset.uri);
           continue;
         }
         const photoUri = asset.uri;
-        console.log("Processing:", photoUri);
 
         try {
           // ── Step 1: BlazeFace detection ──────────────────────────────────
@@ -108,9 +108,6 @@ export default function AiScreen() {
           const detectorOutputs = await faceDetector.forward([inputTensorPtr]);
           const bboxes = postprocessBlazeFace(detectorOutputs);
 
-          console.log(`  Found ${bboxes.length} face(s)`);
-          console.log("  BBoxes:", JSON.stringify(bboxes));
-
           if (bboxes.length === 0) {
             results.push({ uri: photoUri, faces: [] });
             setImageResults([...results]);
@@ -119,6 +116,15 @@ export default function AiScreen() {
 
           // ── Step 2–4: Crop → age + gender per face ───────────────────────
           const faces: FaceResult[] = [];
+          const nonCroppedVitTensor = await imageUriToViTTensor(photoUri);
+          const nonCroppedVitTensorPtr: TensorPtr = {
+            dataPtr: nonCroppedVitTensor,
+            sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],
+            scalarType: ScalarType.FLOAT,
+          };
+          const nsfwOutputs = await nsfwModel.forward([nonCroppedVitTensorPtr]);
+          const nsfwLogits = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
+          const nsfwScores = allFromLogits(nsfwLogits, NSFW_LABELS);
 
           for (const bbox of bboxes) {
             const croppedUri = await cropFace(
@@ -135,29 +141,19 @@ export default function AiScreen() {
               scalarType: ScalarType.FLOAT,
             };
 
-            const nonCroppedVitTensor = await imageUriToViTTensor(photoUri);
-            const nonCroppedVitTensorPtr: TensorPtr = {
-              dataPtr: nonCroppedVitTensor,
-              sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],
-              scalarType: ScalarType.FLOAT,
-            };
-            
-
-            const [ageOutputs, genderOutputs, nsfwOutputs] = await Promise.all([
+            const [ageOutputs, genderOutputs] = await Promise.all([
               ageModel.forward([vitTensorPtr]),
               genderModel.forward([vitTensorPtr]),
-              nsfwModel.forward([nonCroppedVitTensorPtr]),
             ]);
 
-            const ageLogits    = new Float32Array(ageOutputs[0].dataPtr as ArrayBuffer);
+            const ageLogits = new Float32Array(ageOutputs[0].dataPtr as ArrayBuffer);
             const genderLogits = new Float32Array(genderOutputs[0].dataPtr as ArrayBuffer);
-            const nsfwLogits   = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
 
             faces.push({
               bbox,
               age:    topFromLogits(ageLogits,    AGE_LABELS),
               gender: topFromLogits(genderLogits, GENDER_LABELS),
-              nsfw:   allFromLogits(nsfwLogits,   NSFW_LABELS),
+              nsfw:   nsfwScores,
             });
           }
 
@@ -176,7 +172,7 @@ export default function AiScreen() {
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (!isReady) {
-    const downloading = [faceDetector, ageModel, genderModel].find(
+    const downloading = [faceDetector, ageModel, genderModel, nsfwModel].find(
       (m) => m.downloadProgress < 1
     );
     return (

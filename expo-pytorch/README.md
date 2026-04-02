@@ -42,6 +42,27 @@ To learn more about developing your project with Expo, look at the following res
 - [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
 - [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
 
+## ExecuTorch model export
+
+For local model export, use the repo-level setup script to create a dedicated Python export environment:
+
+```bash
+./scripts/setup_executorch_export_env.sh
+```
+
+Then export whichever backend you need:
+
+```bash
+./scripts/export_models_ios_coreml.sh
+./scripts/export_models_xnnpack.sh
+```
+
+Notes:
+
+- CoreML export requires macOS and a compatible Python export environment.
+- The setup script creates `../.venv-executorch-export`, which is local-only and ignored by git.
+- The export scripts automatically use that local environment when it exists.
+
 ## Join the community
 
 Join our community of developers creating universal apps.

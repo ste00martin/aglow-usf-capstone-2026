@@ -17,7 +17,7 @@ export async function getLocalUri(asset: MediaLibrary.Asset): Promise<string> {
   const isVideo = asset.mediaType === 'video'; // filter out videos
   let localUri = info.localUri;
   if (isVideo) {
-    console.log("Major Debug:", localUri)
+    //console.log("Major Debug:", localUri)
     return localUri;
   }
 

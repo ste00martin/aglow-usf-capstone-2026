@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Pressable, Image, ScrollView, Text, View, Linking, StyleSheet, Button } from "react-native";
+import { Alert, Pressable, Image, ScrollView, Text, View, Linking, StyleSheet, Button, TouchableOpacity, TurboModuleRegistry, ActivityIndicator } from "react-native";
 import { AlbumContext } from "../../AlbumContext";
 import { useContext } from "react";
 import * as ImagePicker from 'expo-image-picker';
@@ -11,7 +11,7 @@ import { imageUriToTensor, postprocessBlazeFace, cropFace, imageUriToViTTensor, 
 import { NSFW_MODEL } from "../../assets/models/executorchModels";
 
 const VIDEO_MAX_DURATION = 30; // seconds
-const FRAME_INTERVAL = 5000; // milliseconds between frames to extract
+const FRAME_INTERVAL = 2500; // milliseconds between frames to extract
 const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
 
 const VIT_INPUT_SIZE = 224;
@@ -25,11 +25,16 @@ type ImageResult = {
 export default function VideoUploadScreen() {
     // some code here.
     const [video, setVideo] = useState<string>("");
-    const [frames, setFrames] = useState<string[]>([]); // array of asset uris for frames from video
     const [thumbnails, setThumbnails] = useState<ImageResult[]>([]);
+    const [running, setRunning] = useState(false);
+    const [videoLoaded, setVideoLoaded] = useState(false); 
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
 
     const pickVideo = async () => {
+        //setVideoLoaded(false); // reset video loaded state
+        setThumbnails([]); // reset thumbnails when picking a new video
+        setVideo(""); // reset video URI
+
         const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!permissionResult.granted) {
             Alert.alert('Permission required', 'Permission to access the media library is required.');
@@ -44,7 +49,9 @@ export default function VideoUploadScreen() {
             videoMaxDuration: VIDEO_MAX_DURATION, // limit to VIDEO_MAX_DURATION seconds
         });
         
-        if (!result.canceled) { // if we get something..
+        if (!result.canceled) { // if a video is loaded successfully..
+            setRunning(true);
+            setVideoLoaded(true)
             const selectedUri = result.assets[0].uri;
             const duration = result.assets[0].duration ?? 30000;
 
@@ -55,7 +62,6 @@ export default function VideoUploadScreen() {
             setVideo(result.assets[0].uri); // always chooses the first video
             for (let time = 0; time < duration; time += FRAME_INTERVAL) {
                 const { uri: thumbnail } = await VideoThumbnails.getThumbnailAsync(selectedUri, { time: time });
-                setFrames(prev => [...prev, thumbnail]);
                 
                 console.log(`Extracted frame at ${time}ms: ${thumbnail}`);
 
@@ -78,6 +84,7 @@ export default function VideoUploadScreen() {
                 })
             }
             setThumbnails([...thumbnails])
+            setRunning(false);
         }
     };
     const player = useVideoPlayer(
@@ -86,39 +93,53 @@ export default function VideoUploadScreen() {
 
     return (
         <View style={{ flex: 1 }}>
+            {running && (
+                <View style={styles.overlay}>
+                    <ActivityIndicator size="large" color="#fff" />
+                </View>
+            )}
           <ScrollView
             contentContainerStyle={styles.container}
             showsVerticalScrollIndicator={true}
           >
-            <Pressable style={styles.buttonContainer} onPress={pickVideo}>
-              <Text style={styles.button}>Upload a Video.</Text>
-            </Pressable>                
-      
-            <VideoView
-              player={player}
-              style={styles.video}
-              nativeControls
-              contentFit="contain"
-            />
-      
-            {thumbnails.map((item, index) => (
-              <View key={index} style={{ marginVertical: 12, alignItems: 'center' }}>
-                <Text>
-                    Timestamp: {item.timestamp} ms
-                </Text>
-                <Image
-                  source={{ uri: item.uri }}
-                  style={{ width: 200, height: 120 }}
-                />
-      
-                <Text>
-                    NSFW: {item.nsfw.map(n => `${n.label} (${(n.score * 100).toFixed(1)}%)`).join(", ")}
-                </Text>
-              </View>
-            ))}
+            {!videoLoaded ? (
+                <>
+                    <Pressable style={styles.buttonContainer} onPress={pickVideo}>
+                        <Text style={styles.button}>Upload a Video.</Text>
+                    </Pressable>
+                </>
+            ) : (
+                <>
+                    <Pressable style={styles.buttonContainer} onPress={pickVideo}>
+                        <Text style={styles.button}>Upload another Video.</Text>
+                    </Pressable>
+                    <VideoView
+                        player={player}
+                        style={styles.video}
+                        nativeControls
+                        contentFit="contain"
+                    />
+                    {thumbnails.map((item, index) => (
+                        <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
+                            <Text>Timestamp: {item.timestamp} ms</Text>
+                            <Image
+                                source={{ uri: item.uri }}
+                                style={{ width: 200, height: 120 }}
+                            />
+                            <View>
+                                {item.nsfw.map((n, i) => (
+                                    <Text key={i}>
+                                        {n.label} ({(n.score * 100).toFixed(1)}%)
+                                    </Text>
+                                ))}
+                            </View>
+                        </View>
+                    ))}
+                </>
+            )}
           </ScrollView>
         </View>
-      );
+    );
 }
 
 
@@ -138,11 +159,21 @@ const styles = StyleSheet.create({
 
     container: {
         alignItems: 'center',
-        paddingVertical: 20,
+        paddingVertical: 40,
     },
     image: {
         width: 200,
         height: 200,
     },
-    video: { width: '100%', aspectRatio: 16/9 },
+    overlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    video: { 
+        width: '100%', 
+        aspectRatio: 16/9,
+        marginVertical: 20,
+    },
 });

@@ -47,10 +47,10 @@ export default function VideoUploadScreen() {
 
 
     const pickVideo = async () => {
-        setRunning(true);
         setThumbnails([]); // reset thumbnails when picking a new video
         setFlagged([]); // reset flagged results when picking a new video
         setVideo(""); // reset video URI
+        setRunning(false);
 
         const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!permissionResult.granted) {
@@ -68,6 +68,7 @@ export default function VideoUploadScreen() {
         
         if (!result.canceled) { // if a video is loaded successfully..
             setVideoLoaded(true)
+            setRunning(true);
             const selectedUri = result.assets[0].uri;
             const duration = result.assets[0].duration ?? 30000;
 
@@ -154,7 +155,7 @@ export default function VideoUploadScreen() {
                         <>
                             {!flaggedExpanded ? (
                                 <>
-                                    {!running && (
+                                    {flagged.length > 0 && (
                                         <Pressable style={styles.buttonContainer} onPress={() => 
                                         {   
                                             setFlaggedExpanded(!flaggedExpanded)
@@ -195,7 +196,7 @@ export default function VideoUploadScreen() {
 
                     {(!totalExpanded) ? (
                         <>
-                            {!running && (
+                            {thumbnails.length > 0 && (
                                 <Pressable style={styles.buttonContainer} onPress={() => 
                                 {
                                     setTotalExpanded(!totalExpanded)

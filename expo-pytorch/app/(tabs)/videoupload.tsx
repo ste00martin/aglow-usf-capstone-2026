@@ -11,7 +11,7 @@ import { imageUriToTensor, postprocessBlazeFace, cropFace, imageUriToViTTensor, 
 import { NSFW_MODEL } from "../../assets/models/executorchModels";
 
 const VIDEO_MAX_DURATION = 30; // seconds
-const FRAME_INTERVAL = 500; // milliseconds between frames to extract
+const FRAME_INTERVAL = 1000; // milliseconds between frames to extract
 const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
 const NSFW_METRIC = 0.5; // threshold for flagging content as NSFW
 
@@ -22,6 +22,14 @@ type ImageResult = {
     uri: string;
     nsfw: { label: string; score: number }[];
 };
+
+function formatTime(ms: number): string { // applies flooring by default, e.g. 5500ms is 0:05, not 0:06
+    const totalSeconds = Math.floor(ms / 1000); // convert milliseconds to seconds
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const paddedSeconds = seconds.toString().padStart(2, '0'); // ensures 2 digits
+    return `${minutes}:${paddedSeconds}`;
+}
 
 export default function VideoUploadScreen() {
     // some code here.
@@ -166,7 +174,7 @@ export default function VideoUploadScreen() {
                                 </Pressable>
                                 {flagged.map((item, index) => (
                                     <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
-                                        <Text>Timestamp: {item.timestamp} ms</Text>
+                                        <Text>Timestamp: {formatTime(item.timestamp)} </Text>
                                         <Image
                                             source={{ uri: item.uri }}
                                             style={{ width: 200, height: 120 }}
@@ -204,7 +212,7 @@ export default function VideoUploadScreen() {
                             </Pressable>
                             {thumbnails.map((item, index) => (
                                 <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
-                                    <Text>Timestamp: {item.timestamp} ms</Text>
+                                    <Text>Timestamp: {formatTime(item.timestamp)}</Text>
                                     <Image
                                         source={{ uri: item.uri }}
                                         style={{ width: 200, height: 120 }}

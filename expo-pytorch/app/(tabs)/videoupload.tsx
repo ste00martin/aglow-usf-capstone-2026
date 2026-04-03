@@ -11,8 +11,9 @@ import { imageUriToTensor, postprocessBlazeFace, cropFace, imageUriToViTTensor, 
 import { NSFW_MODEL } from "../../assets/models/executorchModels";
 
 const VIDEO_MAX_DURATION = 30; // seconds
-const FRAME_INTERVAL = 2500; // milliseconds between frames to extract
+const FRAME_INTERVAL = 500; // milliseconds between frames to extract
 const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
+const NSFW_METRIC = 0.5; // threshold for flagging content as NSFW
 
 const VIT_INPUT_SIZE = 224;
 
@@ -26,12 +27,16 @@ export default function VideoUploadScreen() {
     // some code here.
     const [video, setVideo] = useState<string>("");
     const [thumbnails, setThumbnails] = useState<ImageResult[]>([]);
+    const [flagged, setFlagged] = useState<ImageResult[]>([])
     const [running, setRunning] = useState(false);
     const [videoLoaded, setVideoLoaded] = useState(false); 
+
+    const [totalExpanded, setTotalExpanded] = useState(false);
+    const [flaggedExpanded, setFlaggedExpanded] = useState(false);
+
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
 
     const pickVideo = async () => {
-        //setVideoLoaded(false); // reset video loaded state
         setThumbnails([]); // reset thumbnails when picking a new video
         setVideo(""); // reset video URI
 
@@ -58,6 +63,7 @@ export default function VideoUploadScreen() {
             console.log("Duration: " + duration);
 
             const thumbnails: ImageResult[] = [];
+            const flagged: ImageResult[] = [];
 
             setVideo(result.assets[0].uri); // always chooses the first video
             for (let time = 0; time < duration; time += FRAME_INTERVAL) {
@@ -72,18 +78,32 @@ export default function VideoUploadScreen() {
                     scalarType: ScalarType.FLOAT,
                 };
 
-                //const nsfwOutputs = await Promise.all(nsfwModel.forward([nonCroppedVitTensorPtr]);)
                 const nsfwOutputs = await nsfwModel.forward([nonCroppedVitTensorPtr]);
 
-                const nsfwLogits   = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
+                const nsfwLogits = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
+                const result = allFromLogits(nsfwLogits, NSFW_LABELS);
 
                 thumbnails.push({
                     timestamp: time,
                     uri: thumbnail,
-                    nsfw: allFromLogits(nsfwLogits, NSFW_LABELS),
+                    nsfw: result,
                 })
+
+                const flag = result.some(
+                    (n) =>
+                        (n.label === "gore_bloodshed_violent" || n.label === "nudity_pornography") &&
+                        n.score >= NSFW_METRIC
+                );
+                if (flag) {
+                    flagged.push({
+                        timestamp: time,
+                        uri: thumbnail,
+                        nsfw: result,
+                    })
+                }
             }
             setThumbnails([...thumbnails])
+            setFlagged([...flagged])
             setRunning(false);
         }
     };
@@ -119,22 +139,68 @@ export default function VideoUploadScreen() {
                         nativeControls
                         contentFit="contain"
                     />
-                    {thumbnails.map((item, index) => (
-                        <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
-                            <Text>Timestamp: {item.timestamp} ms</Text>
-                            <Image
-                                source={{ uri: item.uri }}
-                                style={{ width: 200, height: 120 }}
-                            />
-                            <View>
-                                {item.nsfw.map((n, i) => (
-                                    <Text key={i}>
-                                        {n.label} ({(n.score * 100).toFixed(1)}%)
-                                    </Text>
-                                ))}
-                            </View>
-                        </View>
-                    ))}
+                    {(!totalExpanded) ? (
+                        <>
+                            {!running && (
+                                <Pressable style={styles.buttonContainer} onPress={() => setTotalExpanded(!totalExpanded)}>
+                                    <Text style={styles.button}>Open Frame Analysis</Text>
+                                </Pressable>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            <Pressable style={styles.buttonContainer} onPress={() => setTotalExpanded(!totalExpanded)}>
+                                <Text style={styles.button}>Close Frame Analysis</Text>
+                            </Pressable>
+                            {thumbnails.map((item, index) => (
+                                <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
+                                    <Text>Timestamp: {item.timestamp} ms</Text>
+                                    <Image
+                                        source={{ uri: item.uri }}
+                                        style={{ width: 200, height: 120 }}
+                                    />
+                                    <View>
+                                        {item.nsfw.map((n, i) => (
+                                            <Text key={i}>
+                                                {n.label} ({(n.score * 100).toFixed(1)}%)
+                                            </Text>
+                                        ))}
+                                    </View>
+                                </View>
+                            ))}
+                        </>
+                    )}
+                    {!flaggedExpanded ? (
+                        <>
+                            {!running && (
+                                <Pressable style={styles.buttonContainer} onPress={() => setFlaggedExpanded(!flaggedExpanded)}>
+                                    <Text style={styles.button}>Open Flagged Analysis</Text>
+                                </Pressable>
+                            )}
+                        </>
+                    ): (
+                        <>
+                            <Pressable style={styles.buttonContainer} onPress={() => setFlaggedExpanded(!flaggedExpanded)}>
+                                <Text style={styles.button}>Close Flagged Analysis</Text>
+                            </Pressable>
+                            {flagged.map((item, index) => (
+                                <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
+                                    <Text>Timestamp: {item.timestamp} ms</Text>
+                                    <Image
+                                        source={{ uri: item.uri }}
+                                        style={{ width: 200, height: 120 }}
+                                    />
+                                    <View>
+                                        {item.nsfw.map((n, i) => (
+                                            <Text key={i}>
+                                                {n.label} ({(n.score * 100).toFixed(1)}%)
+                                            </Text>
+                                        ))}
+                                    </View>
+                                </View>
+                            ))}
+                        </>
+                    )}
                 </>
             )}
           </ScrollView>
@@ -159,7 +225,7 @@ const styles = StyleSheet.create({
 
     container: {
         alignItems: 'center',
-        paddingVertical: 40,
+        paddingVertical: 10,
     },
     image: {
         width: 200,

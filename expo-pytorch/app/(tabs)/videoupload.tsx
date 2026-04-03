@@ -37,6 +37,7 @@ export default function VideoUploadScreen() {
 
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
 
+
     const pickVideo = async () => {
         setRunning(true);
         setThumbnails([]); // reset thumbnails when picking a new video
@@ -141,42 +142,46 @@ export default function VideoUploadScreen() {
                         nativeControls
                         contentFit="contain"
                     />
-                    {!flaggedExpanded ? (
+                    {flagged.length > 0 && (
                         <>
-                            {!running && (
+                            {!flaggedExpanded ? (
+                                <>
+                                    {!running && (
+                                        <Pressable style={styles.buttonContainer} onPress={() => 
+                                        {   
+                                            setFlaggedExpanded(!flaggedExpanded)
+                                            setTotalExpanded(false);
+                                        }}>
+                                            <Text style={styles.button}>Open Flagged Analysis</Text>
+                                        </Pressable>
+                                    )}
+                                </>
+                            ): (
+                                <>
                                 <Pressable style={styles.buttonContainer} onPress={() => 
-                                {
-                                    setFlaggedExpanded(!flaggedExpanded)
-                                    setTotalExpanded(false);
-                                }}>
-                                    <Text style={styles.button}>Open Flagged Analysis</Text>
+                                    {
+                                        setFlaggedExpanded(!flaggedExpanded)
+                                    }}>
+                                    <Text style={styles.button}>Close Flagged Analysis</Text>
                                 </Pressable>
-                            )}
-                        </>
-                    ): (
-                        <>
-                            <Pressable style={styles.buttonContainer} onPress={() => 
-                                {
-                                    setFlaggedExpanded(!flaggedExpanded)
-                                }}>
-                                <Text style={styles.button}>Close Flagged Analysis</Text>
-                            </Pressable>
-                            {flagged.map((item, index) => (
-                                <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
-                                    <Text>Timestamp: {item.timestamp} ms</Text>
-                                    <Image
-                                        source={{ uri: item.uri }}
-                                        style={{ width: 200, height: 120 }}
-                                    />
-                                    <View>
-                                        {item.nsfw.map((n, i) => (
-                                            <Text key={i}>
-                                                {n.label} ({(n.score * 100).toFixed(1)}%)
-                                            </Text>
+                                {flagged.map((item, index) => (
+                                    <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
+                                        <Text>Timestamp: {item.timestamp} ms</Text>
+                                        <Image
+                                            source={{ uri: item.uri }}
+                                            style={{ width: 200, height: 120 }}
+                                        />
+                                        <View>
+                                            {item.nsfw.map((n, i) => (
+                                                <Text key={i}>
+                                                    {n.label} ({(n.score * 100).toFixed(1)}%)
+                                                </Text>
                                         ))}
+                                        </View>
                                     </View>
-                                </View>
-                            ))}
+                                ))}
+                            </>
+                        )}
                         </>
                     )}
 

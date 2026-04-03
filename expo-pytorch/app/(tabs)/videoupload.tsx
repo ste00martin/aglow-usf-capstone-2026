@@ -28,6 +28,7 @@ export default function VideoUploadScreen() {
     const [video, setVideo] = useState<string>("");
     const [thumbnails, setThumbnails] = useState<ImageResult[]>([]);
     const [flagged, setFlagged] = useState<ImageResult[]>([])
+
     const [running, setRunning] = useState(false);
     const [videoLoaded, setVideoLoaded] = useState(false); 
 
@@ -37,7 +38,9 @@ export default function VideoUploadScreen() {
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
 
     const pickVideo = async () => {
+        setRunning(true);
         setThumbnails([]); // reset thumbnails when picking a new video
+        setFlagged([]); // reset flagged results when picking a new video
         setVideo(""); // reset video URI
 
         const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -55,7 +58,6 @@ export default function VideoUploadScreen() {
         });
         
         if (!result.canceled) { // if a video is loaded successfully..
-            setRunning(true);
             setVideoLoaded(true)
             const selectedUri = result.assets[0].uri;
             const duration = result.assets[0].duration ?? 30000;
@@ -139,20 +141,27 @@ export default function VideoUploadScreen() {
                         nativeControls
                         contentFit="contain"
                     />
-                    {(!totalExpanded) ? (
+                    {!flaggedExpanded ? (
                         <>
                             {!running && (
-                                <Pressable style={styles.buttonContainer} onPress={() => setTotalExpanded(!totalExpanded)}>
-                                    <Text style={styles.button}>Open Frame Analysis</Text>
+                                <Pressable style={styles.buttonContainer} onPress={() => 
+                                {
+                                    setFlaggedExpanded(!flaggedExpanded)
+                                    setTotalExpanded(false);
+                                }}>
+                                    <Text style={styles.button}>Open Flagged Analysis</Text>
                                 </Pressable>
                             )}
                         </>
-                    ) : (
+                    ): (
                         <>
-                            <Pressable style={styles.buttonContainer} onPress={() => setTotalExpanded(!totalExpanded)}>
-                                <Text style={styles.button}>Close Frame Analysis</Text>
+                            <Pressable style={styles.buttonContainer} onPress={() => 
+                                {
+                                    setFlaggedExpanded(!flaggedExpanded)
+                                }}>
+                                <Text style={styles.button}>Close Flagged Analysis</Text>
                             </Pressable>
-                            {thumbnails.map((item, index) => (
+                            {flagged.map((item, index) => (
                                 <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
                                     <Text>Timestamp: {item.timestamp} ms</Text>
                                     <Image
@@ -170,20 +179,25 @@ export default function VideoUploadScreen() {
                             ))}
                         </>
                     )}
-                    {!flaggedExpanded ? (
+
+                    {(!totalExpanded) ? (
                         <>
                             {!running && (
-                                <Pressable style={styles.buttonContainer} onPress={() => setFlaggedExpanded(!flaggedExpanded)}>
-                                    <Text style={styles.button}>Open Flagged Analysis</Text>
+                                <Pressable style={styles.buttonContainer} onPress={() => 
+                                {
+                                    setTotalExpanded(!totalExpanded)
+                                    setFlaggedExpanded(false);
+                                }}>
+                                    <Text style={styles.button}>Open Frame Analysis</Text>
                                 </Pressable>
                             )}
                         </>
-                    ): (
+                    ) : (
                         <>
-                            <Pressable style={styles.buttonContainer} onPress={() => setFlaggedExpanded(!flaggedExpanded)}>
-                                <Text style={styles.button}>Close Flagged Analysis</Text>
+                            <Pressable style={styles.buttonContainer} onPress={() => setTotalExpanded(!totalExpanded)}>
+                                <Text style={styles.button}>Close Frame Analysis</Text>
                             </Pressable>
-                            {flagged.map((item, index) => (
+                            {thumbnails.map((item, index) => (
                                 <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
                                     <Text>Timestamp: {item.timestamp} ms</Text>
                                     <Image

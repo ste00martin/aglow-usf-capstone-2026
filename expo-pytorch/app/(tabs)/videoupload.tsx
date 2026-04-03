@@ -6,6 +6,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useExecutorchModule, ScalarType } from "react-native-executorch";
+import { extractAudio } from 'expo-video-audio-extractor';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { TensorPtr } from "react-native-executorch";
 import { imageUriToTensor, postprocessBlazeFace, cropFace, imageUriToViTTensor, topFromLogits, allFromLogits } from "../../aipreprocessing"
 import { NSFW_MODEL } from "../../assets/models/executorchModels";
@@ -33,6 +36,8 @@ function formatTime(ms: number): string { // applies flooring by default, e.g. 5
 
 export default function VideoUploadScreen() {
     // some code here.
+    const [audio, setAudio] = useState<string | null>(null);
+    const [audioKey, setAudioKey] = useState(0);
     const [video, setVideo] = useState<string>("");
     const [thumbnails, setThumbnails] = useState<ImageResult[]>([]);
     const [flagged, setFlagged] = useState<ImageResult[]>([])
@@ -42,6 +47,8 @@ export default function VideoUploadScreen() {
 
     const [totalExpanded, setTotalExpanded] = useState(false);
     const [flaggedExpanded, setFlaggedExpanded] = useState(false);
+
+    const [isFinished, setIsFinished] = useState(false);
 
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
 
@@ -71,6 +78,26 @@ export default function VideoUploadScreen() {
             setRunning(true);
             const selectedUri = result.assets[0].uri;
             const duration = result.assets[0].duration ?? 30000;
+
+            console.log(FileSystem);
+
+            const outputUri = FileSystem.documentDirectory + 'speech.m4a';
+
+            await extractAudio({
+            // Required
+            video:  selectedUri,
+            output: outputUri,
+
+            // Optional controls ↓
+            format: 'm4a',      // 'm4a' (default) or 'wav'
+            volume: 0.9,        // 90 % volume (linear gain)
+            channels: 1,        // force mono (wav only)
+            sampleRate: 16000,  // override sample-rate (wav only)
+            });
+
+            console.log('Audio saved at', outputUri);
+
+            setAudio(outputUri);
 
             console.log("Duration: " + duration);
 
@@ -123,6 +150,12 @@ export default function VideoUploadScreen() {
         { uri: video ?? undefined } // this accepts your remote URI directly
     );
 
+    const audioPlayer = useAudioPlayer(
+        { uri: audio ?? undefined}
+    );
+
+    const status = useAudioPlayerStatus(audioPlayer);
+
     return (
         <View style={{ flex: 1 }}>
             {running && (
@@ -151,6 +184,39 @@ export default function VideoUploadScreen() {
                         nativeControls
                         contentFit="contain"
                     />
+
+                    {audio && (
+                        <View key={audio} style={{ marginVertical: 10 }}>
+                            <Pressable
+                                style={styles.buttonContainer}
+                                onPress={() => {
+                                    if (!audioPlayer || !status) return;
+                                
+                                    // Compare current time with duration
+                                    if (status.currentTime < status.duration) {
+                                      audioPlayer.play(); // resume if not finished
+                                    } else {
+                                      audioPlayer.seekTo(0); // reset and play if finished
+                                      audioPlayer.play();
+                                    }
+                                  }}
+                            >
+                                <Text style={styles.button}>Play Audio</Text>
+                            </Pressable>
+
+                            <Pressable
+                                style={styles.buttonContainer}
+                                onPress={() => audioPlayer.pause()}
+                            >
+                                <Text style={styles.button}>Pause Audio</Text>
+                            </Pressable>
+                            <Text>Playing: {status.playing ? 'Yes' : 'No'}</Text>
+                            <Text>Current Time: {status.currentTime}s</Text>
+                            <Text>Duration: {status.duration}s</Text>
+                        </View>
+                    )}
+                    
+
                     {flagged.length > 0 && (
                         <>
                             {!flaggedExpanded ? (

@@ -5,20 +5,22 @@ import { useContext } from "react";
 import * as ImagePicker from 'expo-image-picker';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import { useExecutorchModule, ScalarType } from "react-native-executorch";
+import { useExecutorchModule, ScalarType, useSpeechToText, WHISPER_SMALL } from "react-native-executorch";
 import { extractAudio } from 'expo-video-audio-extractor';
+import { AudioContext } from 'react-native-audio-api';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { TensorPtr } from "react-native-executorch";
-import { imageUriToTensor, postprocessBlazeFace, cropFace, imageUriToViTTensor, topFromLogits, allFromLogits } from "../../aipreprocessing"
-import { NSFW_MODEL } from "../../assets/models/executorchModels";
+import { imageUriToViTTensor, allFromLogits } from "../../aipreprocessing"
 
+import { NSFW_MODEL } from "../../assets/models/executorchModels";
 const VIDEO_MAX_DURATION = 30; // seconds
 const FRAME_INTERVAL = 1000; // milliseconds between frames to extract
 const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
 const NSFW_METRIC = 0.5; // threshold for flagging content as NSFW
 
 const VIT_INPUT_SIZE = 224;
+
 
 type ImageResult = {
     timestamp: number;
@@ -37,27 +39,31 @@ function formatTime(ms: number): string { // applies flooring by default, e.g. 5
 export default function VideoUploadScreen() {
     // some code here.
     const [audio, setAudio] = useState<string | null>(null);
-    const [audioKey, setAudioKey] = useState(0);
     const [video, setVideo] = useState<string>("");
     const [thumbnails, setThumbnails] = useState<ImageResult[]>([]);
     const [flagged, setFlagged] = useState<ImageResult[]>([])
+    const [transcript, setTranscript] = useState<string | null>("");
 
     const [running, setRunning] = useState(false);
     const [videoLoaded, setVideoLoaded] = useState(false); 
 
     const [totalExpanded, setTotalExpanded] = useState(false);
     const [flaggedExpanded, setFlaggedExpanded] = useState(false);
-
-    const [isFinished, setIsFinished] = useState(false);
+    const [transcriptExpanded, setTranscriptExpanded] = useState(false);
+    const [audioButtonStatus, setAudioButtonStatus] = useState<boolean>(false);
 
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
+    const ttsModel = useSpeechToText({ model: WHISPER_SMALL,});
 
+    const isReady = nsfwModel.isReady && ttsModel.isReady;
 
-    const pickVideo = async () => {
+    useEffect(() => {
+        if (!isReady || !running) return;
+        const pickVideo = async () => {
         setThumbnails([]); // reset thumbnails when picking a new video
         setFlagged([]); // reset flagged results when picking a new video
         setVideo(""); // reset video URI
-        setRunning(false);
+        setAudio(null); // reset audio URI
 
         const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!permissionResult.granted) {
@@ -75,7 +81,6 @@ export default function VideoUploadScreen() {
         
         if (!result.canceled) { // if a video is loaded successfully..
             setVideoLoaded(true)
-            setRunning(true);
             const selectedUri = result.assets[0].uri;
             const duration = result.assets[0].duration ?? 30000;
 
@@ -84,20 +89,21 @@ export default function VideoUploadScreen() {
             const outputUri = FileSystem.documentDirectory + 'speech.m4a';
 
             await extractAudio({
-            // Required
-            video:  selectedUri,
-            output: outputUri,
+                // Required
+                video:  selectedUri,
+                output: outputUri,
 
-            // Optional controls ↓
-            format: 'm4a',      // 'm4a' (default) or 'wav'
-            volume: 0.9,        // 90 % volume (linear gain)
-            channels: 1,        // force mono (wav only)
-            sampleRate: 16000,  // override sample-rate (wav only)
+                // Optional controls ↓
+                format: 'm4a',      // 'm4a' (default) or 'wav'
+                volume: 0.9,        // 90 % volume (linear gain)
+                channels: 2,        // force mono (wav only)
+                sampleRate: 16000,  // override sample-rate (wav only)
             });
 
             console.log('Audio saved at', outputUri);
-
             setAudio(outputUri);
+            const transcribedAudio = await transcribeAudio(outputUri);
+            setTranscript(transcribedAudio)
 
             console.log("Duration: " + duration);
 
@@ -146,6 +152,27 @@ export default function VideoUploadScreen() {
             setRunning(false);
         }
     };
+    pickVideo()
+    }, [running]);
+    
+
+    const transcribeAudio = async (audioUri: string) => {
+        const response = await fetch(audioUri);
+        const arrayBuffer = await response.arrayBuffer();
+
+        const audioContext = new AudioContext({ sampleRate: 16000 });
+        const decodedAudioData = await audioContext.decodeAudioData(arrayBuffer);
+        const audioBuffer = decodedAudioData.getChannelData(0);
+
+        try {
+            const transcription = await ttsModel.transcribe(audioBuffer, {language: 'en'});
+            return transcription;
+        } catch (error) {
+            console.error('Error during audio transcription', error);
+            return null;
+        }
+    }
+
     const player = useVideoPlayer(
         { uri: video ?? undefined } // this accepts your remote URI directly
     );
@@ -155,6 +182,15 @@ export default function VideoUploadScreen() {
     );
 
     const status = useAudioPlayerStatus(audioPlayer);
+
+    if (!isReady) {
+        return (
+            <View style={[styles.container, { flex: 1, justifyContent: 'center' }]}>
+                <ActivityIndicator size="large" color="#0000ff" />
+                <Text style={{ marginTop: 10 }}>Loading models...</Text>
+            </View>
+        );
+    }
 
     return (
         <View style={{ flex: 1 }}>
@@ -169,13 +205,13 @@ export default function VideoUploadScreen() {
           >
             {!videoLoaded ? (
                 <>
-                    <Pressable style={styles.buttonContainer} onPress={pickVideo}>
+                    <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
                         <Text style={styles.button}>Upload a Video.</Text>
                     </Pressable>
                 </>
             ) : (
                 <>
-                    <Pressable style={styles.buttonContainer} onPress={pickVideo}>
+                    <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
                         <Text style={styles.button}>Upload another Video.</Text>
                     </Pressable>
                     <VideoView
@@ -185,38 +221,49 @@ export default function VideoUploadScreen() {
                         contentFit="contain"
                     />
 
-                    {audio && (
+                    {audio != null && (
                         <View key={audio} style={{ marginVertical: 10 }}>
-                            <Pressable
-                                style={styles.buttonContainer}
-                                onPress={() => {
-                                    if (!audioPlayer || !status) return;
+                            {audioButtonStatus === false ? (
+                                <>
+                                    <Pressable
+                                        style={styles.buttonContainer}
+                                        onPress={() => {
+                                            if (!audioPlayer || !status) return;
                                 
-                                    // Compare current time with duration
-                                    if (status.currentTime < status.duration) {
-                                      audioPlayer.play(); // resume if not finished
-                                    } else {
-                                      audioPlayer.seekTo(0); // reset and play if finished
-                                      audioPlayer.play();
-                                    }
-                                  }}
-                            >
-                                <Text style={styles.button}>Play Audio</Text>
-                            </Pressable>
-
-                            <Pressable
-                                style={styles.buttonContainer}
-                                onPress={() => audioPlayer.pause()}
-                            >
-                                <Text style={styles.button}>Pause Audio</Text>
-                            </Pressable>
+                                            // Compare current time with duration
+                                            if (status.currentTime < status.duration) {
+                                                audioPlayer.play(); // resume if not finished
+                                            } else {
+                                                audioPlayer.seekTo(0); // reset and play if finished
+                                                audioPlayer.play();
+                                            }
+                                            setAudioButtonStatus(true)
+                                            setFlaggedExpanded(false)
+                                            setTotalExpanded(false);
+                                        }}
+                                    >
+                                        <Text style={styles.button}>Play Audio</Text>
+                                    </Pressable>
+                                </>
+                            ) : (
+                                <>
+                                    <Pressable
+                                        style={styles.buttonContainer}
+                                        onPress={() => {
+                                            audioPlayer.pause()
+                                            setAudioButtonStatus(false)
+                                        }}
+                                    >
+                                        <Text style={styles.button}>Pause Audio</Text>
+                                    </Pressable>
+                                </>
+                            )}
                             <Text>Playing: {status.playing ? 'Yes' : 'No'}</Text>
                             <Text>Current Time: {status.currentTime}s</Text>
                             <Text>Duration: {status.duration}s</Text>
                         </View>
                     )}
                     
-
                     {flagged.length > 0 && (
                         <>
                             {!flaggedExpanded ? (
@@ -295,6 +342,29 @@ export default function VideoUploadScreen() {
                             ))}
                         </>
                     )}
+
+                    {(!transcriptExpanded) ? (
+                        <>
+                            {thumbnails.length > 0 && (
+                                <Pressable style={styles.buttonContainer} onPress={() => 
+                                {
+                                    setTranscriptExpanded(!transcriptExpanded)
+                                    setFlaggedExpanded(false);
+                                }}>
+                                    <Text style={styles.button}>Open Transcript</Text>
+                                </Pressable>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            <Pressable style={styles.buttonContainer} onPress={() => setTranscriptExpanded(!transcriptExpanded)}>
+                                <Text style={styles.button}>Close Transcript</Text>
+                            </Pressable>
+                            <Text style={styles.text}>
+                                {transcript || "No transcription yet..."}
+                            </Text>
+                        </>
+                    )}
                 </>
             )}
           </ScrollView>
@@ -335,5 +405,8 @@ const styles = StyleSheet.create({
         width: '100%', 
         aspectRatio: 16/9,
         marginVertical: 20,
+    },
+    text: {
+    fontSize: 16,
     },
 });

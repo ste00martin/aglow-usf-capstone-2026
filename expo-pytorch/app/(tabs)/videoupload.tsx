@@ -5,7 +5,7 @@ import { useContext } from "react";
 import * as ImagePicker from 'expo-image-picker';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import { useExecutorchModule, ScalarType, useSpeechToText, WHISPER_SMALL } from "react-native-executorch";
+import { useExecutorchModule, ScalarType, useSpeechToText, WHISPER_TINY } from "react-native-executorch";
 import { extractAudio } from 'expo-video-audio-extractor';
 import { AudioContext } from 'react-native-audio-api';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
@@ -53,7 +53,7 @@ export default function VideoUploadScreen() {
     const [audioButtonStatus, setAudioButtonStatus] = useState<boolean>(false);
 
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
-    const ttsModel = useSpeechToText({ model: WHISPER_SMALL,});
+    const ttsModel = useSpeechToText({ model: WHISPER_TINY,});
 
     const isReady = nsfwModel.isReady && ttsModel.isReady;
 
@@ -172,13 +172,11 @@ export default function VideoUploadScreen() {
             return null;
         }
     }
-
+    const audioPlayer = useAudioPlayer(
+            { uri: audio ?? undefined}
+    );
     const player = useVideoPlayer(
         { uri: video ?? undefined } // this accepts your remote URI directly
-    );
-
-    const audioPlayer = useAudioPlayer(
-        { uri: audio ?? undefined}
     );
 
     const status = useAudioPlayerStatus(audioPlayer);
@@ -211,15 +209,19 @@ export default function VideoUploadScreen() {
                 </>
             ) : (
                 <>
-                    <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
-                        <Text style={styles.button}>Upload another Video.</Text>
-                    </Pressable>
-                    <VideoView
-                        player={player}
-                        style={styles.video}
-                        nativeControls
-                        contentFit="contain"
-                    />
+                    {!running && (
+                        <>
+                            <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
+                                <Text style={styles.button}>Upload another Video.</Text>
+                            </Pressable>
+                            <VideoView
+                                player={player}
+                                style={styles.video}
+                                nativeControls
+                                contentFit="contain"
+                            />
+                        </>
+                    )}
 
                     {audio != null && (
                         <View key={audio} style={{ marginVertical: 10 }}>

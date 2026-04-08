@@ -51,6 +51,7 @@ export default function VideoUploadScreen() {
     const [flaggedExpanded, setFlaggedExpanded] = useState(false);
     const [transcriptExpanded, setTranscriptExpanded] = useState(false);
     const [audioButtonStatus, setAudioButtonStatus] = useState<boolean>(false);
+    const [replayButtonStatus, setReplayButtonStatus] = useState<boolean>(false);
 
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
     const ttsModel = useSpeechToText({ model: WHISPER_TINY,});
@@ -223,7 +224,7 @@ export default function VideoUploadScreen() {
                         </>
                     )}
 
-                    {audio != null && (
+                    {!running && audio != null && (
                         <View key={audio} style={{ marginVertical: 10 }}>
                             {audioButtonStatus === false ? (
                                 <>
@@ -239,8 +240,8 @@ export default function VideoUploadScreen() {
                                                 audioPlayer.seekTo(0); // reset and play if finished
                                                 audioPlayer.play();
                                             }
-                                            setAudioButtonStatus(true)
-                                            setFlaggedExpanded(false)
+                                            setAudioButtonStatus(true);
+                                            setFlaggedExpanded(false);
                                             setTotalExpanded(false);
                                         }}
                                     >
@@ -263,6 +264,24 @@ export default function VideoUploadScreen() {
                             <Text>Playing: {status.playing ? 'Yes' : 'No'}</Text>
                             <Text>Current Time: {status.currentTime}s</Text>
                             <Text>Duration: {status.duration}s</Text>
+                        </View>
+                        
+                    )}
+
+                    {!running && audio != null && (
+                        <View style={{ marginVertical: 10 }}>
+                            <Pressable
+                                style={styles.buttonContainer}
+                                onPress={() => {
+                                    if (!audioPlayer) return;
+
+                                    audioPlayer.seekTo(0); // reset to start
+                                    audioPlayer.play();    // immediately play
+                                    setAudioButtonStatus(true); // show the pause button
+                                }}
+                                >
+                                <Text style={styles.button}>Replay Audio</Text>
+                            </Pressable>
                         </View>
                     )}
                     

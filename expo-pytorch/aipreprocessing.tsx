@@ -391,14 +391,15 @@ export function postprocessBlazeFace(outputs: TensorPtr[]): BBox[] {
   });
 }
 
-/** Crop a face from a photo URI, adding 20% padding around the bbox. */
-export async function cropFace(photoUri: string, bbox: BBox, photoW: number, photoH: number): Promise<string> {
+/** Crop a face from a photo URI, adding padding around the bbox (extra padding on top to prevent cutoff). */
+export async function cropFace(photoUri: string, bbox: BBox, photoW: number, photoH: number, topPaddingMultiplier: number = 0.4): Promise<string> {
   const pad_x = (bbox.xmax - bbox.xmin) * 0.2;
-  const pad_y = (bbox.ymax - bbox.ymin) * 0.2;
+  const pad_y_bottom = (bbox.ymax - bbox.ymin) * 0.2;
+  const pad_y_top = (bbox.ymax - bbox.ymin) * topPaddingMultiplier;
   const x1 = Math.max(0, (bbox.xmin - pad_x) * photoW);
-  const y1 = Math.max(0, (bbox.ymin - pad_y) * photoH);
+  const y1 = Math.max(0, (bbox.ymin - pad_y_top) * photoH);
   const x2 = Math.min(photoW, (bbox.xmax + pad_x) * photoW);
-  const y2 = Math.min(photoH, (bbox.ymax + pad_y) * photoH);
+  const y2 = Math.min(photoH, (bbox.ymax + pad_y_bottom) * photoH);
 
   const result = await ImageManipulator.manipulateAsync(
     photoUri,

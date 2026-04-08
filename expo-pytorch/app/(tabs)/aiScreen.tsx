@@ -44,9 +44,9 @@ const BLAZEFACE_INPUT_SIZE = 128;
 const VIT_INPUT_SIZE = 224;
 // ImageNet normalization: mean and std per channel
 // Label sets from HuggingFace model configs
-const AGE_LABELS    = ['0-2','3-9','10-19','20-29','30-39','40-49','50-59','60-69','more than 70'];
-const GENDER_LABELS = ['female','male'];
-const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
+const AGE_LABELS = ['0-2', '3-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', 'more than 70'];
+const GENDER_LABELS = ['female', 'male'];
+const NSFW_LABELS = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type BBox = { ymin: number; xmin: number; ymax: number; xmax: number };
@@ -72,8 +72,8 @@ export default function AiScreen() {
   const [isRunning, setIsRunning] = useState(false);
 
   const faceDetector = useExecutorchModule({ modelSource: BLAZEFACE_MODEL });
-  const ageModel     = useExecutorchModule({ modelSource: AGE_MODEL });
-  const genderModel  = useExecutorchModule({ modelSource: GENDER_MODEL });
+  const ageModel = useExecutorchModule({ modelSource: AGE_MODEL });
+  const genderModel = useExecutorchModule({ modelSource: GENDER_MODEL });
   const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
 
   const isReady =
@@ -89,7 +89,7 @@ export default function AiScreen() {
       const results: ImageResult[] = [];
 
       for (const asset of assets) {
-        if (asset.mediaType !== "photo"){
+        if (asset.mediaType !== "photo") {
           continue;
         }
         const photoUri = asset.uri;
@@ -136,6 +136,8 @@ export default function AiScreen() {
               asset.height
             );
 
+            console.log("Cropped Face Result: ", croppedUri)
+
             const vitTensor = await imageUriToViTTensor(croppedUri);
             const vitTensorPtr: TensorPtr = {
               dataPtr: vitTensor,
@@ -153,9 +155,9 @@ export default function AiScreen() {
 
             faces.push({
               bbox,
-              age:    topFromLogits(ageLogits,    AGE_LABELS),
+              age: topFromLogits(ageLogits, AGE_LABELS),
               gender: topFromLogits(genderLogits, GENDER_LABELS),
-              nsfw:   nsfwScores,
+              nsfw: nsfwScores,
             });
           }
 
@@ -235,7 +237,7 @@ export default function AiScreen() {
                   {(face.gender.score * 100).toFixed(1)}%)
                 </Text>
                 <Text>
-                  NSFW: {face.nsfw.map(n => `${n.label} (${(n.score*100).toFixed(1)}%)`).join(", ")}
+                  NSFW: {face.nsfw.map(n => `${n.label} (${(n.score * 100).toFixed(1)}%)`).join(", ")}
                 </Text>
               </View>
             ))

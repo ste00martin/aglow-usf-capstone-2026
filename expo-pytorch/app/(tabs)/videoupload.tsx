@@ -89,17 +89,25 @@ export default function VideoUploadScreen() {
 
             const outputUri = FileSystem.documentDirectory + 'speech.m4a';
 
-            await extractAudio({
-                // Required
-                video:  selectedUri,
-                output: outputUri,
+            try {
+                await FileSystem.deleteAsync(outputUri, { idempotent: true });
+            } catch (e) { }
 
-                // Optional controls ↓
-                format: 'm4a',      // 'm4a' (default) or 'wav'
-                volume: 0.9,        // 90 % volume (linear gain)
-                channels: 2,        // force mono (wav only)
-                sampleRate: 16000,  // override sample-rate (wav only)
-            });
+            try {
+                await extractAudio({
+                    // Required
+                    video:  selectedUri,
+                    output: outputUri,
+
+                    // Optional controls ↓
+                    format: 'm4a',      // 'm4a' (default) or 'wav'
+                    volume: 0.9,        // 90 % volume (linear gain)
+                    channels: 2,        // force mono (wav only)
+                    sampleRate: 16000,  // override sample-rate (wav only)
+                });
+            } catch (e) {
+                console.error("extractAudio error:", e);
+            }
 
             console.log('Audio saved at', outputUri);
             setAudio(outputUri);
@@ -113,11 +121,24 @@ export default function VideoUploadScreen() {
 
             setVideo(result.assets[0].uri); // always chooses the first video
             for (let time = 0; time < duration; time += FRAME_INTERVAL) {
-                const { uri: thumbnail } = await VideoThumbnails.getThumbnailAsync(selectedUri, { time: time });
-                
+                let thumbnail: string;
+                try {
+                    const res = await VideoThumbnails.getThumbnailAsync(selectedUri, { time: time });
+                    thumbnail = res.uri;
+                } catch (e) {
+                    console.log(`Failed to extract frame at ${time}ms (hit EOF boundary), breaking loop.`);
+                    break;
+                }
+
                 console.log(`Extracted frame at ${time}ms: ${thumbnail}`);
 
-                const nonCroppedVitTensor = await imageUriToViTTensor(thumbnail);
+                let nonCroppedVitTensor;
+                try {
+                    nonCroppedVitTensor = await imageUriToViTTensor(thumbnail);
+                } catch (e) {
+                    console.error(`Image manipulation failed at frame ${time}ms:`, e);
+                    continue;
+                }
                 const nonCroppedVitTensorPtr: TensorPtr = {
                     dataPtr: nonCroppedVitTensor,
                     sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],

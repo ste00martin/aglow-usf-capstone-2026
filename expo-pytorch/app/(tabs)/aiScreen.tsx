@@ -18,9 +18,9 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Image,
   Pressable,
 } from "react-native";
+import { Image } from 'expo-image';
 import { useState, useContext, useEffect } from "react";
 import { useExecutorchModule, ScalarType } from "react-native-executorch";
 import type { TensorPtr } from "react-native-executorch";

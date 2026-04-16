@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Pressable, Image, ScrollView, Text, View, Linking, StyleSheet, Button, TouchableOpacity, TurboModuleRegistry, ActivityIndicator } from "react-native";
+import { Alert, Pressable, ScrollView, Text, View, Linking, StyleSheet, Button, TouchableOpacity, TurboModuleRegistry, ActivityIndicator } from "react-native";
+import { Image } from 'expo-image';
 import { AlbumContext } from "../../AlbumContext";
 import { useContext } from "react";
 import * as ImagePicker from 'expo-image-picker';
@@ -12,8 +13,12 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { TensorPtr } from "react-native-executorch";
 import { imageUriToViTTensor, allFromLogits } from "../../aipreprocessing"
+import { env, AutoTokenizer } from '@xenova/transformers';
 
-import { NSFW_MODEL } from "../../assets/models/executorchModels";
+env.allowLocalModels = false;
+env.useBrowserCache = false;
+
+import { NSFW_MODEL, TEXT_MODEL } from "../../assets/models/executorchModels";
 const VIDEO_MAX_DURATION = 30; // seconds
 const FRAME_INTERVAL = 1000; // milliseconds between frames to extract
 const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
@@ -43,6 +48,7 @@ export default function VideoUploadScreen() {
     const [thumbnails, setThumbnails] = useState<ImageResult[]>([]);
     const [flagged, setFlagged] = useState<ImageResult[]>([])
     const [transcript, setTranscript] = useState<string | null>("");
+    const [textModeration, setTextModeration] = useState<{label: string, score: number}[]>([]);
 
     const [running, setRunning] = useState(false);
     const [videoLoaded, setVideoLoaded] = useState(false); 
@@ -55,14 +61,16 @@ export default function VideoUploadScreen() {
 
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
     const ttsModel = useSpeechToText({ model: WHISPER_TINY,});
+    const textModel = useExecutorchModule({ modelSource: TEXT_MODEL });
 
-    const isReady = nsfwModel.isReady && ttsModel.isReady;
+    const isReady = nsfwModel.isReady && ttsModel.isReady && textModel.isReady;
 
     useEffect(() => {
         if (!isReady || !running) return;
         const pickVideo = async () => {
         setThumbnails([]); // reset thumbnails when picking a new video
         setFlagged([]); // reset flagged results when picking a new video
+        setTextModeration([]); // reset text moderation results
         setVideo(""); // reset video URI
         setAudio(null); // reset audio URI
 
@@ -113,6 +121,56 @@ export default function VideoUploadScreen() {
             setAudio(outputUri);
             const transcribedAudio = await transcribeAudio(outputUri);
             setTranscript(transcribedAudio)
+
+            if (transcribedAudio) {
+                console.log("Transcribed Audio:", transcribedAudio);
+                try {
+                    // KoalaAI's DeBERTa tokenizer configuration is currently broken in Xenova Transformers JS.
+                    // We utilize the roberta-base layout which has 1:1 vocabulary mappings, applying a manual special token remap.
+                    const tokenizer = await AutoTokenizer.from_pretrained('Xenova/roberta-base');
+                    const tokens = await tokenizer(transcribedAudio, {
+                        padding: 'max_length',
+                        truncation: true,
+                        maxLength: 128,
+                    });
+                    
+                    const inputIdsData = tokens.input_ids.data instanceof BigInt64Array 
+                        ? tokens.input_ids.data 
+                        : new BigInt64Array(tokens.input_ids.data);
+                    
+                    // Remap RoBERTa special tokens -> DeBERTa special tokens natively.
+                    for (let i = 0; i < inputIdsData.length; i++) {
+                        if (inputIdsData[i] === 0n) inputIdsData[i] = 1n;      // RoBERTa <s> -> DeBERTa [CLS] 
+                        else if (inputIdsData[i] === 1n) inputIdsData[i] = 0n; // RoBERTa <pad> -> DeBERTa [PAD]
+                    }
+                        
+                    const attentionMaskData = tokens.attention_mask.data instanceof BigInt64Array 
+                        ? tokens.attention_mask.data 
+                        : new BigInt64Array(tokens.attention_mask.data);
+                    
+                    const inputIdsPtr: TensorPtr = {
+                        dataPtr: inputIdsData,
+                        sizes: [1, 128],
+                        scalarType: ScalarType.LONG,
+                    };
+
+                    const attentionMaskPtr: TensorPtr = {
+                        dataPtr: attentionMaskData,
+                        sizes: [1, 128],
+                        scalarType: ScalarType.LONG,
+                    };
+
+                    const textOutputs = await textModel.forward([inputIdsPtr, attentionMaskPtr]);
+                    const textLogits = new Float32Array(textOutputs[0].dataPtr as ArrayBuffer);
+                    const textLabels = ['H', 'H2', 'HR', 'OK', 'S', 'S3', 'SH', 'V', 'V2'];
+                    const textResult = allFromLogits(textLogits, textLabels);
+                    
+                    setTextModeration(textResult);
+                    console.log("Text Moderation complete:", textResult);
+                } catch (e) {
+                    console.error("Text moderation inference failed: ", e);
+                }
+            }
 
             console.log("Duration: " + duration);
 
@@ -405,6 +463,23 @@ export default function VideoUploadScreen() {
                             <Text style={styles.text}>
                                 {transcript || "No transcription yet..."}
                             </Text>
+                            {textModeration.length > 0 && (
+                                <View style={{ marginTop: 20, alignItems: 'center', width: '100%' }}>
+                                    <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Text Moderation Results:</Text>
+                                    <View style={{ backgroundColor: '#f0f0f0', padding: 15, borderRadius: 10, width: '90%' }}>
+                                        {textModeration.map((res, i) => (
+                                            <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                                                <Text style={{ color: res.label !== 'OK' && res.score > 0.4 ? 'red' : 'black', fontWeight: res.label !== 'OK' && res.score > 0.4 ? 'bold' : 'normal' }}>
+                                                    {res.label}
+                                                </Text>
+                                                <Text style={{ color: res.label !== 'OK' && res.score > 0.4 ? 'red' : 'black' }}>
+                                                    {(res.score * 100).toFixed(1)}%
+                                                </Text>
+                                            </View>
+                                        ))}
+                                    </View>
+                                </View>
+                            )}
                         </>
                     )}
                 </>

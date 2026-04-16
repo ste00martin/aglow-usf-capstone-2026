@@ -21,7 +21,7 @@ env.useBrowserCache = false;
 import { NSFW_MODEL, TEXT_MODEL } from "../../assets/models/executorchModels";
 const VIDEO_MAX_DURATION = 30; // seconds
 const FRAME_INTERVAL = 1000; // milliseconds between frames to extract
-const NSFW_LABELS   = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
+const NSFW_LABELS = ['gore_bloodshed_violent', 'nudity_pornography', 'safe_normal'];
 const NSFW_METRIC = 0.5; // threshold for flagging content as NSFW
 
 const VIT_INPUT_SIZE = 224;
@@ -48,10 +48,10 @@ export default function VideoUploadScreen() {
     const [thumbnails, setThumbnails] = useState<ImageResult[]>([]);
     const [flagged, setFlagged] = useState<ImageResult[]>([])
     const [transcript, setTranscript] = useState<string | null>("");
-    const [textModeration, setTextModeration] = useState<{label: string, score: number}[]>([]);
+    const [textModeration, setTextModeration] = useState<{ label: string, score: number }[]>([]);
 
     const [running, setRunning] = useState(false);
-    const [videoLoaded, setVideoLoaded] = useState(false); 
+    const [videoLoaded, setVideoLoaded] = useState(false);
 
     const [totalExpanded, setTotalExpanded] = useState(false);
     const [flaggedExpanded, setFlaggedExpanded] = useState(false);
@@ -60,7 +60,7 @@ export default function VideoUploadScreen() {
     const [replayButtonStatus, setReplayButtonStatus] = useState<boolean>(false);
 
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
-    const ttsModel = useSpeechToText({ model: WHISPER_TINY,});
+    const ttsModel = useSpeechToText({ model: WHISPER_TINY, });
     const textModel = useExecutorchModule({ modelSource: TEXT_MODEL });
 
     const isReady = nsfwModel.isReady && ttsModel.isReady && textModel.isReady;
@@ -68,173 +68,180 @@ export default function VideoUploadScreen() {
     useEffect(() => {
         if (!isReady || !running) return;
         const pickVideo = async () => {
-        setThumbnails([]); // reset thumbnails when picking a new video
-        setFlagged([]); // reset flagged results when picking a new video
-        setTextModeration([]); // reset text moderation results
-        setVideo(""); // reset video URI
-        setAudio(null); // reset audio URI
+            setThumbnails([]); // reset thumbnails when picking a new video
+            setFlagged([]); // reset flagged results when picking a new video
+            setTextModeration([]); // reset text moderation results
+            setVideo(""); // reset video URI
+            setAudio(null); // reset audio URI
 
-        const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!permissionResult.granted) {
-            Alert.alert('Permission required', 'Permission to access the media library is required.');
-            return;
-        }
-
-        let result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['videos'],
-            allowsEditing: true,
-            aspect: [4, 3],
-            quality: 1,
-            videoMaxDuration: VIDEO_MAX_DURATION, // limit to VIDEO_MAX_DURATION seconds
-        });
-        
-        if (!result.canceled) { // if a video is loaded successfully..
-            setVideoLoaded(true)
-            const selectedUri = result.assets[0].uri;
-            const duration = result.assets[0].duration ?? 30000;
-
-            console.log(FileSystem);
-
-            const outputUri = FileSystem.documentDirectory + 'speech.m4a';
-
-            try {
-                await FileSystem.deleteAsync(outputUri, { idempotent: true });
-            } catch (e) { }
-
-            try {
-                await extractAudio({
-                    // Required
-                    video:  selectedUri,
-                    output: outputUri,
-
-                    // Optional controls ↓
-                    format: 'm4a',      // 'm4a' (default) or 'wav'
-                    volume: 0.9,        // 90 % volume (linear gain)
-                    channels: 2,        // force mono (wav only)
-                    sampleRate: 16000,  // override sample-rate (wav only)
-                });
-            } catch (e) {
-                console.error("extractAudio error:", e);
+            const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!permissionResult.granted) {
+                Alert.alert('Permission required', 'Permission to access the media library is required.');
+                return;
             }
 
-            console.log('Audio saved at', outputUri);
-            setAudio(outputUri);
-            const transcribedAudio = await transcribeAudio(outputUri);
-            setTranscript(transcribedAudio)
+            let result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['videos'],
+                allowsEditing: true,
+                aspect: [4, 3],
+                quality: 1,
+                videoMaxDuration: VIDEO_MAX_DURATION, // limit to VIDEO_MAX_DURATION seconds
+            });
 
-            if (transcribedAudio) {
-                console.log("Transcribed Audio:", transcribedAudio);
+            if (!result.canceled) { // if a video is loaded successfully..
+                setVideoLoaded(true)
+                const selectedUri = result.assets[0].uri;
+                const duration = result.assets[0].duration ?? 30000;
+
+                console.log(FileSystem);
+
+                const outputUri = FileSystem.documentDirectory + 'speech.m4a';
+
                 try {
-                    // KoalaAI's DeBERTa tokenizer configuration is currently broken in Xenova Transformers JS.
-                    // We utilize the roberta-base layout which has 1:1 vocabulary mappings, applying a manual special token remap.
-                    const tokenizer = await AutoTokenizer.from_pretrained('Xenova/roberta-base');
-                    const tokens = await tokenizer(transcribedAudio, {
-                        padding: 'max_length',
-                        truncation: true,
-                        maxLength: 128,
+                    await FileSystem.deleteAsync(outputUri, { idempotent: true });
+                } catch (e) { }
+
+                try {
+                    await extractAudio({
+                        // Required
+                        video: selectedUri,
+                        output: outputUri,
+
+                        // Optional controls ↓
+                        format: 'm4a',      // 'm4a' (default) or 'wav'
+                        volume: 0.9,        // 90 % volume (linear gain)
+                        channels: 2,        // force mono (wav only)
+                        sampleRate: 16000,  // override sample-rate (wav only)
                     });
-                    
-                    const inputIdsData = tokens.input_ids.data instanceof BigInt64Array 
-                        ? tokens.input_ids.data 
-                        : new BigInt64Array(tokens.input_ids.data);
-                    
-                    // Remap RoBERTa special tokens -> DeBERTa special tokens natively.
-                    for (let i = 0; i < inputIdsData.length; i++) {
-                        if (inputIdsData[i] === 0n) inputIdsData[i] = 1n;      // RoBERTa <s> -> DeBERTa [CLS] 
-                        else if (inputIdsData[i] === 1n) inputIdsData[i] = 0n; // RoBERTa <pad> -> DeBERTa [PAD]
+                } catch (e) {
+                    console.error("extractAudio error:", e);
+                }
+
+                console.log('Audio saved at', outputUri);
+                setAudio(outputUri);
+                const transcribedAudio = await transcribeAudio(outputUri);
+                setTranscript(transcribedAudio)
+
+                if (transcribedAudio) {
+                    console.log("Transcribed Audio:", transcribedAudio);
+                    try {
+                        // KoalaAI's DeBERTa tokenizer configuration is currently broken in Xenova Transformers JS.
+                        // We utilize the roberta-base layout which has 1:1 vocabulary mappings, applying a manual special token remap.
+                        const tokenizer = await AutoTokenizer.from_pretrained('Xenova/roberta-base');
+                        const tokens = await tokenizer(transcribedAudio, {
+                            padding: 'max_length',
+                            truncation: true,
+                            maxLength: 128,
+                        });
+
+                        const inputIdsData = tokens.input_ids.data instanceof BigInt64Array
+                            ? tokens.input_ids.data
+                            : new BigInt64Array(tokens.input_ids.data);
+
+                        // Remap RoBERTa special tokens -> DeBERTa special tokens natively.
+                        for (let i = 0; i < inputIdsData.length; i++) {
+                            if (inputIdsData[i] === 0n) inputIdsData[i] = 1n;      // RoBERTa <s> -> DeBERTa [CLS] 
+                            else if (inputIdsData[i] === 1n) inputIdsData[i] = 0n; // RoBERTa <pad> -> DeBERTa [PAD]
+                        }
+
+                        const attentionMaskData = tokens.attention_mask.data instanceof BigInt64Array
+                            ? tokens.attention_mask.data
+                            : new BigInt64Array(tokens.attention_mask.data);
+
+                        const inputIdsPtr: TensorPtr = {
+                            dataPtr: inputIdsData,
+                            sizes: [1, 128],
+                            scalarType: ScalarType.LONG,
+                        };
+
+                        const attentionMaskPtr: TensorPtr = {
+                            dataPtr: attentionMaskData,
+                            sizes: [1, 128],
+                            scalarType: ScalarType.LONG,
+                        };
+
+                        const textOutputs = await textModel.forward([inputIdsPtr, attentionMaskPtr]);
+                        //const textLogits = new Float32Array(textOutputs[0].dataPtr as ArrayBuffer);
+                        const rawData = textOutputs[0].dataPtr;
+                        const textLogits = rawData instanceof Float32Array
+                            ? rawData
+                            : rawData instanceof ArrayBuffer
+                                ? new Float32Array(rawData)
+                                : Float32Array.from(rawData as unknown as number[]);
+                        console.log("textLogits: ", textLogits.length, Array.from(textLogits));
+                        const textLabels = ['H', 'H2', 'HR', 'OK', 'S', 'S3', 'SH', 'V', 'V2'];
+                        const textResult = allFromLogits(textLogits, textLabels);
+
+                        setTextModeration(textResult);
+                        console.log("Text Moderation complete:", textResult);
+                    } catch (e) {
+                        console.error("Text moderation inference failed: ", e);
                     }
-                        
-                    const attentionMaskData = tokens.attention_mask.data instanceof BigInt64Array 
-                        ? tokens.attention_mask.data 
-                        : new BigInt64Array(tokens.attention_mask.data);
-                    
-                    const inputIdsPtr: TensorPtr = {
-                        dataPtr: inputIdsData,
-                        sizes: [1, 128],
-                        scalarType: ScalarType.LONG,
+                }
+
+                console.log("Duration: " + duration);
+
+                const thumbnails: ImageResult[] = [];
+                const flagged: ImageResult[] = [];
+
+                setVideo(result.assets[0].uri); // always chooses the first video
+                for (let time = 0; time < duration; time += FRAME_INTERVAL) {
+                    let thumbnail: string;
+                    try {
+                        const res = await VideoThumbnails.getThumbnailAsync(selectedUri, { time: time });
+                        thumbnail = res.uri;
+                    } catch (e) {
+                        console.log(`Failed to extract frame at ${time}ms (hit EOF boundary), breaking loop.`);
+                        break;
+                    }
+
+                    console.log(`Extracted frame at ${time}ms: ${thumbnail}`);
+
+                    let nonCroppedVitTensor;
+                    try {
+                        nonCroppedVitTensor = await imageUriToViTTensor(thumbnail);
+                    } catch (e) {
+                        console.error(`Image manipulation failed at frame ${time}ms:`, e);
+                        continue;
+                    }
+                    const nonCroppedVitTensorPtr: TensorPtr = {
+                        dataPtr: nonCroppedVitTensor,
+                        sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],
+                        scalarType: ScalarType.FLOAT,
                     };
 
-                    const attentionMaskPtr: TensorPtr = {
-                        dataPtr: attentionMaskData,
-                        sizes: [1, 128],
-                        scalarType: ScalarType.LONG,
-                    };
+                    const nsfwOutputs = await nsfwModel.forward([nonCroppedVitTensorPtr]);
 
-                    const textOutputs = await textModel.forward([inputIdsPtr, attentionMaskPtr]);
-                    const textLogits = new Float32Array(textOutputs[0].dataPtr as ArrayBuffer);
-                    const textLabels = ['H', 'H2', 'HR', 'OK', 'S', 'S3', 'SH', 'V', 'V2'];
-                    const textResult = allFromLogits(textLogits, textLabels);
-                    
-                    setTextModeration(textResult);
-                    console.log("Text Moderation complete:", textResult);
-                } catch (e) {
-                    console.error("Text moderation inference failed: ", e);
-                }
-            }
+                    const nsfwLogits = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
+                    const result = allFromLogits(nsfwLogits, NSFW_LABELS);
 
-            console.log("Duration: " + duration);
-
-            const thumbnails: ImageResult[] = [];
-            const flagged: ImageResult[] = [];
-
-            setVideo(result.assets[0].uri); // always chooses the first video
-            for (let time = 0; time < duration; time += FRAME_INTERVAL) {
-                let thumbnail: string;
-                try {
-                    const res = await VideoThumbnails.getThumbnailAsync(selectedUri, { time: time });
-                    thumbnail = res.uri;
-                } catch (e) {
-                    console.log(`Failed to extract frame at ${time}ms (hit EOF boundary), breaking loop.`);
-                    break;
-                }
-
-                console.log(`Extracted frame at ${time}ms: ${thumbnail}`);
-
-                let nonCroppedVitTensor;
-                try {
-                    nonCroppedVitTensor = await imageUriToViTTensor(thumbnail);
-                } catch (e) {
-                    console.error(`Image manipulation failed at frame ${time}ms:`, e);
-                    continue;
-                }
-                const nonCroppedVitTensorPtr: TensorPtr = {
-                    dataPtr: nonCroppedVitTensor,
-                    sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],
-                    scalarType: ScalarType.FLOAT,
-                };
-
-                const nsfwOutputs = await nsfwModel.forward([nonCroppedVitTensorPtr]);
-
-                const nsfwLogits = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
-                const result = allFromLogits(nsfwLogits, NSFW_LABELS);
-
-                thumbnails.push({
-                    timestamp: time,
-                    uri: thumbnail,
-                    nsfw: result,
-                })
-
-                const flag = result.some(
-                    (n) =>
-                        (n.label === "gore_bloodshed_violent" || n.label === "nudity_pornography") &&
-                        n.score >= NSFW_METRIC
-                );
-                if (flag) {
-                    flagged.push({
+                    thumbnails.push({
                         timestamp: time,
                         uri: thumbnail,
                         nsfw: result,
                     })
+
+                    const flag = result.some(
+                        (n) =>
+                            (n.label === "gore_bloodshed_violent" || n.label === "nudity_pornography") &&
+                            n.score >= NSFW_METRIC
+                    );
+                    if (flag) {
+                        flagged.push({
+                            timestamp: time,
+                            uri: thumbnail,
+                            nsfw: result,
+                        })
+                    }
                 }
+                setThumbnails([...thumbnails])
+                setFlagged([...flagged])
+                setRunning(false);
             }
-            setThumbnails([...thumbnails])
-            setFlagged([...flagged])
-            setRunning(false);
-        }
-    };
-    pickVideo()
+        };
+        pickVideo()
     }, [running]);
-    
+
 
     const transcribeAudio = async (audioUri: string) => {
         const response = await fetch(audioUri);
@@ -245,7 +252,7 @@ export default function VideoUploadScreen() {
         const audioBuffer = decodedAudioData.getChannelData(0);
 
         try {
-            const transcription = await ttsModel.transcribe(audioBuffer, {language: 'en'});
+            const transcription = await ttsModel.transcribe(audioBuffer, { language: 'en' });
             return transcription;
         } catch (error) {
             console.error('Error during audio transcription', error);
@@ -253,7 +260,7 @@ export default function VideoUploadScreen() {
         }
     }
     const audioPlayer = useAudioPlayer(
-            { uri: audio ?? undefined}
+        { uri: audio ?? undefined }
     );
     const player = useVideoPlayer(
         { uri: video ?? undefined } // this accepts your remote URI directly
@@ -277,118 +284,153 @@ export default function VideoUploadScreen() {
                     <ActivityIndicator size="large" color="#fff" />
                 </View>
             )}
-          <ScrollView
-            contentContainerStyle={styles.container}
-            showsVerticalScrollIndicator={true}
-          >
-            {!videoLoaded ? (
-                <>
-                    <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
-                        <Text style={styles.button}>Upload a Video.</Text>
-                    </Pressable>
-                </>
-            ) : (
-                <>
-                    {!running && (
-                        <>
-                            <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
-                                <Text style={styles.button}>Upload another Video.</Text>
-                            </Pressable>
-                            <VideoView
-                                player={player}
-                                style={styles.video}
-                                nativeControls
-                                contentFit="contain"
-                            />
-                        </>
-                    )}
-
-                    {!running && audio != null && (
-                        <View key={audio} style={{ marginVertical: 10 }}>
-                            {audioButtonStatus === false ? (
-                                <>
-                                    <Pressable
-                                        style={styles.buttonContainer}
-                                        onPress={() => {
-                                            if (!audioPlayer || !status) return;
-                                
-                                            // Compare current time with duration
-                                            if (status.currentTime < status.duration) {
-                                                audioPlayer.play(); // resume if not finished
-                                            } else {
-                                                audioPlayer.seekTo(0); // reset and play if finished
-                                                audioPlayer.play();
-                                            }
-                                            setAudioButtonStatus(true);
-                                            setFlaggedExpanded(false);
-                                            setTotalExpanded(false);
-                                        }}
-                                    >
-                                        <Text style={styles.button}>Play Audio</Text>
-                                    </Pressable>
-                                </>
-                            ) : (
-                                <>
-                                    <Pressable
-                                        style={styles.buttonContainer}
-                                        onPress={() => {
-                                            audioPlayer.pause()
-                                            setAudioButtonStatus(false)
-                                        }}
-                                    >
-                                        <Text style={styles.button}>Pause Audio</Text>
-                                    </Pressable>
-                                </>
-                            )}
-                            <Text>Playing: {status.playing ? 'Yes' : 'No'}</Text>
-                            <Text>Current Time: {status.currentTime}s</Text>
-                            <Text>Duration: {status.duration}s</Text>
-                        </View>
-                        
-                    )}
-
-                    {!running && audio != null && (
-                        <View style={{ marginVertical: 10 }}>
-                            <Pressable
-                                style={styles.buttonContainer}
-                                onPress={() => {
-                                    if (!audioPlayer) return;
-
-                                    audioPlayer.seekTo(0); // reset to start
-                                    audioPlayer.play();    // immediately play
-                                    setAudioButtonStatus(true); // show the pause button
-                                }}
-                                >
-                                <Text style={styles.button}>Replay Audio</Text>
-                            </Pressable>
-                        </View>
-                    )}
-                    
-                    {flagged.length > 0 && (
-                        <>
-                            {!flaggedExpanded ? (
-                                <>
-                                    {flagged.length > 0 && (
-                                        <Pressable style={styles.buttonContainer} onPress={() => 
-                                        {   
-                                            setFlaggedExpanded(!flaggedExpanded)
-                                            setTotalExpanded(false);
-                                        }}>
-                                            <Text style={styles.button}>Open Flagged Analysis</Text>
-                                        </Pressable>
-                                    )}
-                                </>
-                            ): (
-                                <>
-                                <Pressable style={styles.buttonContainer} onPress={() => 
-                                    {
-                                        setFlaggedExpanded(!flaggedExpanded)
-                                    }}>
-                                    <Text style={styles.button}>Close Flagged Analysis</Text>
+            <ScrollView
+                contentContainerStyle={styles.container}
+                showsVerticalScrollIndicator={true}
+            >
+                {!videoLoaded ? (
+                    <>
+                        <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
+                            <Text style={styles.button}>Upload a Video.</Text>
+                        </Pressable>
+                    </>
+                ) : (
+                    <>
+                        {!running && (
+                            <>
+                                <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
+                                    <Text style={styles.button}>Upload another Video.</Text>
                                 </Pressable>
-                                {flagged.map((item, index) => (
+                                <VideoView
+                                    player={player}
+                                    style={styles.video}
+                                    nativeControls
+                                    contentFit="contain"
+                                />
+                            </>
+                        )}
+
+                        {!running && audio != null && (
+                            <View key={audio} style={{ marginVertical: 10 }}>
+                                {audioButtonStatus === false ? (
+                                    <>
+                                        <Pressable
+                                            style={styles.buttonContainer}
+                                            onPress={() => {
+                                                if (!audioPlayer || !status) return;
+
+                                                // Compare current time with duration
+                                                if (status.currentTime < status.duration) {
+                                                    audioPlayer.play(); // resume if not finished
+                                                } else {
+                                                    audioPlayer.seekTo(0); // reset and play if finished
+                                                    audioPlayer.play();
+                                                }
+                                                setAudioButtonStatus(true);
+                                                setFlaggedExpanded(false);
+                                                setTotalExpanded(false);
+                                            }}
+                                        >
+                                            <Text style={styles.button}>Play Audio</Text>
+                                        </Pressable>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Pressable
+                                            style={styles.buttonContainer}
+                                            onPress={() => {
+                                                audioPlayer.pause()
+                                                setAudioButtonStatus(false)
+                                            }}
+                                        >
+                                            <Text style={styles.button}>Pause Audio</Text>
+                                        </Pressable>
+                                    </>
+                                )}
+                                <Text>Playing: {status.playing ? 'Yes' : 'No'}</Text>
+                                <Text>Current Time: {status.currentTime}s</Text>
+                                <Text>Duration: {status.duration}s</Text>
+                            </View>
+
+                        )}
+
+                        {!running && audio != null && (
+                            <View style={{ marginVertical: 10 }}>
+                                <Pressable
+                                    style={styles.buttonContainer}
+                                    onPress={() => {
+                                        if (!audioPlayer) return;
+
+                                        audioPlayer.seekTo(0); // reset to start
+                                        audioPlayer.play();    // immediately play
+                                        setAudioButtonStatus(true); // show the pause button
+                                    }}
+                                >
+                                    <Text style={styles.button}>Replay Audio</Text>
+                                </Pressable>
+                            </View>
+                        )}
+
+                        {flagged.length > 0 && (
+                            <>
+                                {!flaggedExpanded ? (
+                                    <>
+                                        {flagged.length > 0 && (
+                                            <Pressable style={styles.buttonContainer} onPress={() => {
+                                                setFlaggedExpanded(!flaggedExpanded)
+                                                setTotalExpanded(false);
+                                            }}>
+                                                <Text style={styles.button}>Open Flagged Analysis</Text>
+                                            </Pressable>
+                                        )}
+                                    </>
+                                ) : (
+                                    <>
+                                        <Pressable style={styles.buttonContainer} onPress={() => {
+                                            setFlaggedExpanded(!flaggedExpanded)
+                                        }}>
+                                            <Text style={styles.button}>Close Flagged Analysis</Text>
+                                        </Pressable>
+                                        {flagged.map((item, index) => (
+                                            <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
+                                                <Text>Timestamp: {formatTime(item.timestamp)} </Text>
+                                                <Image
+                                                    source={{ uri: item.uri }}
+                                                    style={{ width: 200, height: 120 }}
+                                                />
+                                                <View>
+                                                    {item.nsfw.map((n, i) => (
+                                                        <Text key={i}>
+                                                            {n.label} ({(n.score * 100).toFixed(1)}%)
+                                                        </Text>
+                                                    ))}
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </>
+                                )}
+                            </>
+                        )}
+
+                        {(!totalExpanded) ? (
+                            <>
+                                {thumbnails.length > 0 && (
+                                    <Pressable style={styles.buttonContainer} onPress={() => {
+                                        setTotalExpanded(!totalExpanded)
+                                        setFlaggedExpanded(false);
+                                    }}>
+                                        <Text style={styles.button}>Open Frame Analysis</Text>
+                                    </Pressable>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <Pressable style={styles.buttonContainer} onPress={() => setTotalExpanded(!totalExpanded)}>
+                                    <Text style={styles.button}>Close Frame Analysis</Text>
+                                </Pressable>
+                                {thumbnails.map((item, index) => (
                                     <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
-                                        <Text>Timestamp: {formatTime(item.timestamp)} </Text>
+                                        <Text>Timestamp: {formatTime(item.timestamp)}</Text>
                                         <Image
                                             source={{ uri: item.uri }}
                                             style={{ width: 200, height: 120 }}
@@ -398,110 +440,71 @@ export default function VideoUploadScreen() {
                                                 <Text key={i}>
                                                     {n.label} ({(n.score * 100).toFixed(1)}%)
                                                 </Text>
-                                        ))}
+                                            ))}
                                         </View>
                                     </View>
                                 ))}
                             </>
                         )}
-                        </>
-                    )}
 
-                    {(!totalExpanded) ? (
-                        <>
-                            {thumbnails.length > 0 && (
-                                <Pressable style={styles.buttonContainer} onPress={() => 
-                                {
-                                    setTotalExpanded(!totalExpanded)
-                                    setFlaggedExpanded(false);
-                                }}>
-                                    <Text style={styles.button}>Open Frame Analysis</Text>
+                        {(!transcriptExpanded) ? (
+                            <>
+                                {thumbnails.length > 0 && (
+                                    <Pressable style={styles.buttonContainer} onPress={() => {
+                                        setTranscriptExpanded(!transcriptExpanded)
+                                        setFlaggedExpanded(false);
+                                    }}>
+                                        <Text style={styles.button}>Open Transcript</Text>
+                                    </Pressable>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <Pressable style={styles.buttonContainer} onPress={() => setTranscriptExpanded(!transcriptExpanded)}>
+                                    <Text style={styles.button}>Close Transcript</Text>
                                 </Pressable>
-                            )}
-                        </>
-                    ) : (
-                        <>
-                            <Pressable style={styles.buttonContainer} onPress={() => setTotalExpanded(!totalExpanded)}>
-                                <Text style={styles.button}>Close Frame Analysis</Text>
-                            </Pressable>
-                            {thumbnails.map((item, index) => (
-                                <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
-                                    <Text>Timestamp: {formatTime(item.timestamp)}</Text>
-                                    <Image
-                                        source={{ uri: item.uri }}
-                                        style={{ width: 200, height: 120 }}
-                                    />
-                                    <View>
-                                        {item.nsfw.map((n, i) => (
-                                            <Text key={i}>
-                                                {n.label} ({(n.score * 100).toFixed(1)}%)
-                                            </Text>
-                                        ))}
+                                <Text style={styles.text}>
+                                    {transcript || "No transcription yet..."}
+                                </Text>
+                                {textModeration.length > 0 && (
+                                    <View style={{ marginTop: 20, alignItems: 'center', width: '100%' }}>
+                                        <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Text Moderation Results:</Text>
+                                        <View style={{ backgroundColor: '#f0f0f0', padding: 15, borderRadius: 10, width: '90%' }}>
+                                            {textModeration.map((res, i) => (
+                                                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                                                    <Text style={{ color: res.label !== 'OK' && res.score > 0.4 ? 'red' : 'black', fontWeight: res.label !== 'OK' && res.score > 0.4 ? 'bold' : 'normal' }}>
+                                                        {res.label}
+                                                    </Text>
+                                                    <Text style={{ color: res.label !== 'OK' && res.score > 0.4 ? 'red' : 'black' }}>
+                                                        {(res.score * 100).toFixed(1)}%
+                                                    </Text>
+                                                </View>
+                                            ))}
+                                        </View>
                                     </View>
-                                </View>
-                            ))}
-                        </>
-                    )}
-
-                    {(!transcriptExpanded) ? (
-                        <>
-                            {thumbnails.length > 0 && (
-                                <Pressable style={styles.buttonContainer} onPress={() => 
-                                {
-                                    setTranscriptExpanded(!transcriptExpanded)
-                                    setFlaggedExpanded(false);
-                                }}>
-                                    <Text style={styles.button}>Open Transcript</Text>
-                                </Pressable>
-                            )}
-                        </>
-                    ) : (
-                        <>
-                            <Pressable style={styles.buttonContainer} onPress={() => setTranscriptExpanded(!transcriptExpanded)}>
-                                <Text style={styles.button}>Close Transcript</Text>
-                            </Pressable>
-                            <Text style={styles.text}>
-                                {transcript || "No transcription yet..."}
-                            </Text>
-                            {textModeration.length > 0 && (
-                                <View style={{ marginTop: 20, alignItems: 'center', width: '100%' }}>
-                                    <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Text Moderation Results:</Text>
-                                    <View style={{ backgroundColor: '#f0f0f0', padding: 15, borderRadius: 10, width: '90%' }}>
-                                        {textModeration.map((res, i) => (
-                                            <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                                                <Text style={{ color: res.label !== 'OK' && res.score > 0.4 ? 'red' : 'black', fontWeight: res.label !== 'OK' && res.score > 0.4 ? 'bold' : 'normal' }}>
-                                                    {res.label}
-                                                </Text>
-                                                <Text style={{ color: res.label !== 'OK' && res.score > 0.4 ? 'red' : 'black' }}>
-                                                    {(res.score * 100).toFixed(1)}%
-                                                </Text>
-                                            </View>
-                                        ))}
-                                    </View>
-                                </View>
-                            )}
-                        </>
-                    )}
-                </>
-            )}
-          </ScrollView>
+                                )}
+                            </>
+                        )}
+                    </>
+                )}
+            </ScrollView>
         </View>
     );
 }
 
 
 const styles = StyleSheet.create({
-    button:{
-      fontSize: 20,
-      color: '#fff',
+    button: {
+        fontSize: 20,
+        color: '#fff',
     },
     buttonContainer: {
-      paddingVertical: 10,
-      paddingHorizontal: 16,
-      borderRadius: 8,
-      backgroundColor: '#333',
-      margin: 8,
-      alignItems: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        backgroundColor: '#333',
+        margin: 8,
+        alignItems: 'center',
     },
 
     container: {
@@ -518,12 +521,12 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    video: { 
-        width: '100%', 
-        aspectRatio: 16/9,
+    video: {
+        width: '100%',
+        aspectRatio: 16 / 9,
         marginVertical: 20,
     },
     text: {
-    fontSize: 16,
+        fontSize: 16,
     },
 });

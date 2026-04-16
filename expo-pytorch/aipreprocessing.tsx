@@ -275,6 +275,20 @@ export function allFromLogits(logits: Float32Array, labels: string[]): { label: 
   return results;
 }
 
+/**
+ * Returns all labels + sigmoid scores sorted descending.
+ * Use this for multi-label classifiers (each class is independent, scores don't sum to 1).
+ */
+export function allFromSigmoid(logits: Float32Array, labels: string[]): { label: string; score: number }[] {
+  const results = Array.from({ length: logits.length }, (_, idx) => ({
+    label: labels[idx] ?? `class_${idx}`,
+    score: 1 / (1 + Math.exp(-logits[idx])), // sigmoid per class
+  }));
+
+  results.sort((a, b) => b.score - a.score);
+  return results;
+}
+
 // ── BlazeFace postprocessing ──────────────────────────────────────────────────
 
 /**

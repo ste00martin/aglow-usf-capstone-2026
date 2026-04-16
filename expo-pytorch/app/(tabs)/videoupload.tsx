@@ -12,7 +12,7 @@ import { AudioContext } from 'react-native-audio-api';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { TensorPtr } from "react-native-executorch";
-import { imageUriToViTTensor, allFromLogits } from "../../aipreprocessing"
+import { imageUriToViTTensor, allFromLogits, allFromSigmoid } from "../../aipreprocessing"
 import { env, AutoTokenizer } from '@xenova/transformers';
 
 env.allowLocalModels = false;
@@ -125,9 +125,9 @@ export default function VideoUploadScreen() {
                 if (transcribedAudio) {
                     console.log("Transcribed Audio:", transcribedAudio);
                     try {
-                        // KoalaAI's DeBERTa tokenizer configuration is currently broken in Xenova Transformers JS.
-                        // We utilize the roberta-base layout which has 1:1 vocabulary mappings, applying a manual special token remap.
-                        const tokenizer = await AutoTokenizer.from_pretrained('Xenova/roberta-base');
+                        // unitary/toxic-bert uses standard bert-base-uncased tokenizer
+                        // which Xenova supports natively — no special token remapping needed.
+                        const tokenizer = await AutoTokenizer.from_pretrained('Xenova/bert-base-uncased');
                         const tokens = await tokenizer(transcribedAudio, {
                             padding: 'max_length',
                             truncation: true,
@@ -137,12 +137,6 @@ export default function VideoUploadScreen() {
                         const inputIdsData = tokens.input_ids.data instanceof BigInt64Array
                             ? tokens.input_ids.data
                             : new BigInt64Array(tokens.input_ids.data);
-
-                        // Remap RoBERTa special tokens -> DeBERTa special tokens natively.
-                        for (let i = 0; i < inputIdsData.length; i++) {
-                            if (inputIdsData[i] === 0n) inputIdsData[i] = 1n;      // RoBERTa <s> -> DeBERTa [CLS] 
-                            else if (inputIdsData[i] === 1n) inputIdsData[i] = 0n; // RoBERTa <pad> -> DeBERTa [PAD]
-                        }
 
                         const attentionMaskData = tokens.attention_mask.data instanceof BigInt64Array
                             ? tokens.attention_mask.data
@@ -161,7 +155,6 @@ export default function VideoUploadScreen() {
                         };
 
                         const textOutputs = await textModel.forward([inputIdsPtr, attentionMaskPtr]);
-                        //const textLogits = new Float32Array(textOutputs[0].dataPtr as ArrayBuffer);
                         const rawData = textOutputs[0].dataPtr;
                         const textLogits = rawData instanceof Float32Array
                             ? rawData
@@ -169,8 +162,9 @@ export default function VideoUploadScreen() {
                                 ? new Float32Array(rawData)
                                 : Float32Array.from(rawData as unknown as number[]);
                         console.log("textLogits: ", textLogits.length, Array.from(textLogits));
-                        const textLabels = ['H', 'H2', 'HR', 'OK', 'S', 'S3', 'SH', 'V', 'V2'];
-                        const textResult = allFromLogits(textLogits, textLabels);
+                        // unitary/toxic-bert: 6-label multi-label sigmoid (Jigsaw Toxic Comment categories)
+                        const textLabels = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate'];
+                        const textResult = allFromSigmoid(textLogits, textLabels);
 
                         setTextModeration(textResult);
                         console.log("Text Moderation complete:", textResult);
@@ -470,16 +464,19 @@ export default function VideoUploadScreen() {
                                     <View style={{ marginTop: 20, alignItems: 'center', width: '100%' }}>
                                         <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Text Moderation Results:</Text>
                                         <View style={{ backgroundColor: '#f0f0f0', padding: 15, borderRadius: 10, width: '90%' }}>
-                                            {textModeration.map((res, i) => (
-                                                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                                                    <Text style={{ color: res.label !== 'OK' && res.score > 0.4 ? 'red' : 'black', fontWeight: res.label !== 'OK' && res.score > 0.4 ? 'bold' : 'normal' }}>
-                                                        {res.label}
-                                                    </Text>
-                                                    <Text style={{ color: res.label !== 'OK' && res.score > 0.4 ? 'red' : 'black' }}>
-                                                        {(res.score * 100).toFixed(1)}%
-                                                    </Text>
-                                                </View>
-                                            ))}
+                                            {textModeration.map((res, i) => {
+                                                const isFlagged = res.score > 0.4;
+                                                return (
+                                                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                                                        <Text style={{ color: isFlagged ? 'red' : 'black', fontWeight: isFlagged ? 'bold' : 'normal' }}>
+                                                            {res.label}
+                                                        </Text>
+                                                        <Text style={{ color: isFlagged ? 'red' : 'black' }}>
+                                                            {(res.score * 100).toFixed(1)}%
+                                                        </Text>
+                                                    </View>
+                                                );
+                                            })}
                                         </View>
                                     </View>
                                 )}

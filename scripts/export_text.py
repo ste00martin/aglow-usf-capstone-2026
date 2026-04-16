@@ -1,5 +1,11 @@
 """
-Export the Text Moderation classifier (KoalaAI/Text-Moderation) to ExecuTorch .pte format.
+Export the Text Moderation classifier (unitary/toxic-bert) to ExecuTorch .pte format.
+
+This uses BERT-base (standard scaled dot-product attention), which is fully compatible
+with the CoreML backend on iOS — unlike DeBERTa, whose disentangled attention drops
+positional inputs in CoreML's gather/embedding layer and produces NaN.
+
+Labels: toxic, severe_toxic, obscene, threat, insult, identity_hate (multi-label sigmoid)
 
 Prerequisites:
     pip install torch torchvision
@@ -27,7 +33,9 @@ from executorch_export_utils import (
 )
 
 
-MODEL_ID = "KoalaAI/Text-Moderation"
+# BERT-base multi-label toxic content classifier — CoreML compatible (standard attention).
+# 6 labels from the Jigsaw Toxic Comment dataset: toxic, severe_toxic, obscene, threat, insult, identity_hate
+MODEL_ID = "unitary/toxic-bert"
 
 
 def parse_args():
@@ -91,7 +99,36 @@ def main():
     exported_program = export(wrapper, (example_input_ids, example_attention_mask))
 
     print(f"Applying {args.backend.upper()} backend...")
-    et_program = lower_to_executorch(exported_program, args.backend)
+    if args.backend == "coreml":
+        # DeBERTa's first op is an integer embedding lookup which the MpsGraph engine
+        # (GPU / Neural Engine) cannot handle — it causes NaN outputs on the iOS Simulator
+        # and is unreliable on device with ComputeUnit.ALL.
+        # CPU_ONLY + FLOAT32 sidesteps this entirely and works correctly everywhere.
+        import coremltools as ct
+        from executorch.backends.apple.coreml.compiler import CoreMLBackend
+        from executorch.backends.apple.coreml.partition import CoreMLPartitioner
+        from executorch.exir import to_edge_transform_and_lower
+
+        et_program = to_edge_transform_and_lower(
+            exported_program,
+            partitioner=[
+                CoreMLPartitioner(
+                    compile_specs=[
+                        CoreMLBackend.generate_minimum_deployment_target_compile_spec(
+                            ct.target.iOS16
+                        ),
+                        CoreMLBackend.generate_compute_unit_compile_spec(
+                            ct.ComputeUnit.CPU_ONLY
+                        ),
+                        CoreMLBackend.generate_compute_precision_compile_spec(
+                            ct.precision.FLOAT32
+                        ),
+                    ]
+                )
+            ],
+        ).to_executorch()
+    else:
+        et_program = lower_to_executorch(exported_program, args.backend)
 
     output_path = resolve_output_path("text_model.pte", args.backend, args.output)
     write_program(et_program, output_path)

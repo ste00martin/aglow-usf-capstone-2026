@@ -27,7 +27,7 @@ from executorch_export_utils import (
 )
 
 
-MODEL_ID = "KoalaAI/Text-Moderation"
+MODEL_ID = "ifmain/ModerationBERT-En-02"
 
 
 def parse_args():
@@ -54,9 +54,10 @@ def main():
     model = AutoModelForSequenceClassification.from_pretrained(MODEL_ID)
     model.eval()
 
-    # Print labels if available
     if hasattr(model, "config") and hasattr(model.config, "id2label"):
         labels = [model.config.id2label[i] for i in range(len(model.config.id2label))]
+        if MODEL_ID == "ifmain/ModerationBERT-En-02" and labels[0] == "LABEL_0":
+            labels = ['harassment', 'harassment_threatening', 'hate', 'hate_threatening', 'self_harm', 'self_harm_instructions', 'self_harm_intent', 'sexual', 'sexual_minors', 'violence', 'violence_graphic', 'self-harm', 'sexual/minors', 'hate/threatening', 'violence/graphic', 'self-harm/intent', 'self-harm/instructions', 'harassment/threatening']
         print(f"Labels ({len(labels)}): {labels}")
     else:
         print("Warning: No label mapping found in model config.")
@@ -64,8 +65,8 @@ def main():
     # Typical input shape for text classification models
     example_text = "This is a test sentence."
     inputs = tokenizer(example_text, return_tensors="pt", max_length=128, padding="max_length", truncation=True)
-    example_input_ids = inputs["input_ids"]
-    example_attention_mask = inputs["attention_mask"]
+    example_input_ids = inputs["input_ids"].to(torch.int32)
+    example_attention_mask = inputs["attention_mask"].to(torch.int32)
 
     # Sanity check forward pass
     with torch.no_grad():

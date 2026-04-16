@@ -73,6 +73,7 @@ export default function VideoUploadScreen() {
             setTextModeration([]); // reset text moderation results
             setVideo(""); // reset video URI
             setAudio(null); // reset audio URI
+            setTranscript(""); // reset transcript
 
             const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (!permissionResult.granted) {
@@ -125,40 +126,36 @@ export default function VideoUploadScreen() {
                 if (transcribedAudio) {
                     console.log("Transcribed Audio:", transcribedAudio);
                     try {
-                        // KoalaAI's DeBERTa tokenizer configuration is currently broken in Xenova Transformers JS.
-                        // We utilize the roberta-base layout which has 1:1 vocabulary mappings, applying a manual special token remap.
-                        const tokenizer = await AutoTokenizer.from_pretrained('Xenova/roberta-base');
+                        // We utilize standard BERT multilingual tokenization for ModerationBERT.
+                        const tokenizer = await AutoTokenizer.from_pretrained('Xenova/bert-base-multilingual-cased');
                         const tokens = await tokenizer(transcribedAudio, {
                             padding: 'max_length',
                             truncation: true,
-                            maxLength: 128,
+                            max_length: 128,
                         });
 
-                        const inputIdsData = tokens.input_ids.data instanceof BigInt64Array
+                        const inputIdsData = tokens.input_ids.data instanceof Int32Array
                             ? tokens.input_ids.data
-                            : new BigInt64Array(tokens.input_ids.data);
+                            : new Int32Array(Array.from(tokens.input_ids.data, x => Number(x)));
 
-                        // Remap RoBERTa special tokens -> DeBERTa special tokens natively.
-                        for (let i = 0; i < inputIdsData.length; i++) {
-                            if (inputIdsData[i] === 0n) inputIdsData[i] = 1n;      // RoBERTa <s> -> DeBERTa [CLS] 
-                            else if (inputIdsData[i] === 1n) inputIdsData[i] = 0n; // RoBERTa <pad> -> DeBERTa [PAD]
-                        }
-
-                        const attentionMaskData = tokens.attention_mask.data instanceof BigInt64Array
+                        const attentionMaskData = tokens.attention_mask.data instanceof Int32Array
                             ? tokens.attention_mask.data
-                            : new BigInt64Array(tokens.attention_mask.data);
+                            : new Int32Array(Array.from(tokens.attention_mask.data, x => Number(x)));
 
                         const inputIdsPtr: TensorPtr = {
                             dataPtr: inputIdsData,
                             sizes: [1, 128],
-                            scalarType: ScalarType.LONG,
+                            scalarType: ScalarType.INT,
                         };
 
                         const attentionMaskPtr: TensorPtr = {
                             dataPtr: attentionMaskData,
                             sizes: [1, 128],
-                            scalarType: ScalarType.LONG,
+                            scalarType: ScalarType.INT,
                         };
+
+                        console.log("Pre-flight Token Shape Validation:", inputIdsData.length, attentionMaskData.length);
+                        console.log("Sample Tokens:", Array.from(inputIdsData).slice(0, 10));
 
                         const textOutputs = await textModel.forward([inputIdsPtr, attentionMaskPtr]);
                         //const textLogits = new Float32Array(textOutputs[0].dataPtr as ArrayBuffer);
@@ -169,8 +166,26 @@ export default function VideoUploadScreen() {
                                 ? new Float32Array(rawData)
                                 : Float32Array.from(rawData as unknown as number[]);
                         console.log("textLogits: ", textLogits.length, Array.from(textLogits));
-                        const textLabels = ['H', 'H2', 'HR', 'OK', 'S', 'S3', 'SH', 'V', 'V2'];
-                        const textResult = allFromLogits(textLogits, textLabels);
+                        const textLabels = [
+                            'Harassment', 'Harassment (Threatening)', 'Hate Speech', 'Hate Speech (Threatening)',
+                            'Self Harm', 'Self Harm (Instructions)', 'Self Harm (Intent)', 'Explicit (Sexual)',
+                            'Explicit (Minors)', 'Violence', 'Violence (Graphic)', 'Self Harm ',
+                            'Explicit (Minors) ', 'Hate Speech (Threatening) ', 'Violence (Graphic) ',
+                            'Self Harm (Intent) ', 'Self Harm (Instructions) ', 'Harassment (Threatening) '
+                        ];
+                        const textResultRaw = Array.from(textLogits, (logit, idx) => ({
+                            label: textLabels[idx] ?? `class_${idx}`,
+                            score: 1 / (1 + Math.exp(-logit))
+                        }));
+
+                        const uniqueResultMap = new Map<string, number>();
+                        for (const r of textResultRaw) {
+                            const cleanLabel = r.label.trim();
+                            if (!uniqueResultMap.has(cleanLabel) || uniqueResultMap.get(cleanLabel)! < r.score) {
+                                uniqueResultMap.set(cleanLabel, r.score);
+                            }
+                        }
+                        const textResult = Array.from(uniqueResultMap.entries()).map(([label, score]) => ({ label, score }));
 
                         setTextModeration(textResult);
                         console.log("Text Moderation complete:", textResult);
@@ -329,6 +344,7 @@ export default function VideoUploadScreen() {
                                                 setAudioButtonStatus(true);
                                                 setFlaggedExpanded(false);
                                                 setTotalExpanded(false);
+                                                setTranscriptExpanded(false)
                                             }}
                                         >
                                             <Text style={styles.button}>Play Audio</Text>
@@ -470,16 +486,20 @@ export default function VideoUploadScreen() {
                                     <View style={{ marginTop: 20, alignItems: 'center', width: '100%' }}>
                                         <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Text Moderation Results:</Text>
                                         <View style={{ backgroundColor: '#f0f0f0', padding: 15, borderRadius: 10, width: '90%' }}>
-                                            {textModeration.map((res, i) => (
-                                                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                                                    <Text style={{ color: res.label !== 'OK' && res.score > 0.4 ? 'red' : 'black', fontWeight: res.label !== 'OK' && res.score > 0.4 ? 'bold' : 'normal' }}>
-                                                        {res.label}
-                                                    </Text>
-                                                    <Text style={{ color: res.label !== 'OK' && res.score > 0.4 ? 'red' : 'black' }}>
-                                                        {(res.score * 100).toFixed(1)}%
-                                                    </Text>
-                                                </View>
-                                            ))}
+                                            {textModeration.filter(res => (res.score * 100).toFixed(1) !== "0.0").length > 0 ? (
+                                                textModeration.filter(res => (res.score * 100).toFixed(1) !== "0.0").map((res, i) => (
+                                                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                                                        <Text style={{ color: res.score > 0.4 ? 'red' : 'black', fontWeight: res.score > 0.4 ? 'bold' : 'normal' }}>
+                                                            {res.label}
+                                                        </Text>
+                                                        <Text style={{ color: res.score > 0.4 ? 'red' : 'black' }}>
+                                                            {(res.score * 100).toFixed(1)}%
+                                                        </Text>
+                                                    </View>
+                                                ))
+                                            ) : (
+                                                <Text style={{ textAlign: 'center', fontStyle: 'italic', color: '#666' }}>All toxicity categories at 0.0%</Text>
+                                            )}
                                         </View>
                                     </View>
                                 )}

@@ -19,7 +19,6 @@
 import {
   FlatList,
   View,
-  Image,
   Text,
   Pressable,
   Modal,
@@ -29,6 +28,7 @@ import {
   ViewToken,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';

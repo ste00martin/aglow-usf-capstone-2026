@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { Alert, Pressable, Image, ScrollView, Text, View, Linking, StyleSheet, TouchableOpacity } from "react-native";
+import { useEffect } from "react";
+import { Alert, Pressable, ScrollView, Text, View, Linking, StyleSheet, TouchableOpacity } from "react-native";
+import { Image } from 'expo-image';
 import { AlbumContext } from "../../AlbumContext";
 import { useContext } from "react";
 

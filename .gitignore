@@ -47,10 +47,12 @@ expo-pytorch/android
 expo-pytorch/assets/models/age_model.pte
 expo-pytorch/assets/models/gender_model.pte
 expo-pytorch/assets/models/nsfw_model.pte
+expo-pytorch/assets/models/text_model.pte
 expo-pytorch/assets/models/*_coreml.pte
 scripts/age_model.pte
 scripts/gender_model.pte
 scripts/nsfw_model.pte
+scripts/text_model.pte
 scripts/*_coreml.pte
 
 # Kaggle feed — keep a small checked-in subset, ignore the rest

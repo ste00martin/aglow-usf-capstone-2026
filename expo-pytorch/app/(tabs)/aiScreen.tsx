@@ -18,9 +18,9 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Image,
   Pressable,
 } from "react-native";
+import { Image } from 'expo-image';
 import { useState, useContext, useEffect } from "react";
 import { useExecutorchModule, ScalarType } from "react-native-executorch";
 import type { TensorPtr } from "react-native-executorch";
@@ -53,6 +53,7 @@ type BBox = { ymin: number; xmin: number; ymax: number; xmax: number };
 
 type FaceResult = {
   bbox: BBox;
+  faceURI: string;
   age: { label: string; score: number };
   gender: { label: string; score: number };
   nsfw: { label: string; score: number }[];
@@ -84,6 +85,7 @@ export default function AiScreen() {
 
   useEffect(() => {
     if (!isReady || assets.length === 0 || !isRunning) return;
+    console.log(faceDetector.isReady, ageModel.isReady, genderModel.isReady, nsfwModel.isReady);
 
     const runPipeline = async () => {
       const results: ImageResult[] = [];
@@ -155,6 +157,7 @@ export default function AiScreen() {
 
             faces.push({
               bbox,
+              faceURI: croppedUri,
               age: topFromLogits(ageLogits, AGE_LABELS),
               gender: topFromLogits(genderLogits, GENDER_LABELS),
               nsfw: nsfwScores,
@@ -219,7 +222,7 @@ export default function AiScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       {imageResults.map(({ uri, faces, error }) => (
         <View key={uri} style={styles.imageBlock}>
-          <Image source={{ uri }} style={styles.image} resizeMode="contain" />
+          <Image source={{ uri }} style={styles.headImage}/>
 
           {error ? (
             <Text style={styles.errorText}>Error: {error}</Text>
@@ -228,17 +231,20 @@ export default function AiScreen() {
           ) : (
             faces.map((face, idx) => (
               <View key={idx} style={styles.faceBlock}>
-                <Text style={styles.faceHeader}>Face {idx + 1}</Text>
-                <Text>
-                  Age: {face.age.label} ({(face.age.score * 100).toFixed(1)}%)
-                </Text>
-                <Text>
-                  Gender: {face.gender.label} (
-                  {(face.gender.score * 100).toFixed(1)}%)
-                </Text>
-                <Text>
-                  NSFW: {face.nsfw.map(n => `${n.label} (${(n.score * 100).toFixed(1)}%)`).join(", ")}
-                </Text>
+                <Image source={{ uri: face.faceURI }} style={styles.image} />
+                <View style={styles.faceInfo}>
+                  <Text style={styles.faceHeader}>Face {idx + 1}</Text>
+                  <Text style={styles.noFaceText}>
+                    <Text style={{ fontWeight: "500" }}>Age:</Text> Age: {face.age.label} ({(face.age.score * 100).toFixed(1)}%)
+                  </Text>
+                  <Text style={styles.noFaceText}>
+                    <Text style={{ fontWeight: "500" }}>Gender:</Text> {face.gender.label} (
+                    {(face.gender.score * 100).toFixed(1)}%)
+                  </Text>
+                  <Text style={styles.noFaceText}>
+                    <Text style={{ fontWeight: "500" }}>NSFW:</Text> {face.nsfw.map(n => `${n.label} (${(n.score * 100).toFixed(1)}%)`).join(", ")}
+                  </Text>
+                </View>
               </View>
             ))
           )}
@@ -259,25 +265,39 @@ const styles = StyleSheet.create({
     borderColor: "#ccc",
     paddingBottom: 12,
   },
-  image: {
+  headImage: {
     width: "100%",
-    height: 200,
+    height: 150,
     borderRadius: 8,
     marginBottom: 8,
+    resizeMode: "contain",
+  },
+  image: {
+    width: 100,
+    height: 100,
+    borderRadius: 8,
+    resizeMode: "contain",
+  },
+  faceInfo: {
+    flex: 1, // takes remaining width, enabling text wrapping
   },
   faceBlock: {
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#ffffff",
     borderRadius: 6,
-    padding: 8,
+    padding: 10,
     marginTop: 6,
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 8, // adds space between all direct children
   },
+
   faceHeader: {
     fontWeight: "bold",
-    marginBottom: 2,
+    marginBottom: 4,
   },
   noFaceText: {
-    color: "#888",
-    fontStyle: "italic",
+    color: "#000000",
+    flexWrap: "wrap",
   },
   errorText: {
     color: "#c0392b",

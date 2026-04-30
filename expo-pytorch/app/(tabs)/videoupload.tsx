@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, View, Linking, StyleSheet, Button, TouchableOpacity, TurboModuleRegistry, ActivityIndicator } from "react-native";
 import { Image } from 'expo-image';
-import { AlbumContext } from "../../AlbumContext";
-import { useContext } from "react";
 import * as ImagePicker from 'expo-image-picker';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import * as VideoThumbnails from 'expo-video-thumbnails';
@@ -57,7 +55,6 @@ export default function VideoUploadScreen() {
     const [flaggedExpanded, setFlaggedExpanded] = useState(false);
     const [transcriptExpanded, setTranscriptExpanded] = useState(false);
     const [audioButtonStatus, setAudioButtonStatus] = useState<boolean>(false);
-    const [replayButtonStatus, setReplayButtonStatus] = useState<boolean>(false);
 
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
     const ttsModel = useSpeechToText({ model: WHISPER_TINY, });

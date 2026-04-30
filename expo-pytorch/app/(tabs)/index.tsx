@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Alert, Pressable, ScrollView, Text, View, Linking, StyleSheet, TouchableOpacity } from "react-native";
 import { Image } from 'expo-image';
 import { AlbumContext } from "../../AlbumContext";

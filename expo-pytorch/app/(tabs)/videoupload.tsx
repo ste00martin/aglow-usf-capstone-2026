@@ -120,7 +120,9 @@ export default function VideoUploadScreen() {
 
                 console.log('Audio saved at', outputUri);
                 setAudio(outputUri);
+                let start = Date.now()
                 const transcribedAudio = await transcribeAudio(outputUri);
+                console.log("Transcription took ", Date.now() - start, "ms")
                 setTranscript(transcribedAudio)
 
                 if (transcribedAudio) {
@@ -259,6 +261,7 @@ export default function VideoUploadScreen() {
 
 
     const transcribeAudio = async (audioUri: string) => {
+        console.log("Audio URI:", audioUri);
         const response = await fetch(audioUri);
         const arrayBuffer = await response.arrayBuffer();
 

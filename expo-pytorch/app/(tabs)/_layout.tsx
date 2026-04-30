@@ -5,14 +5,14 @@ export default function TabLayout() {
   return(
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#f53dff',
+        tabBarActiveTintColor: '#00c8ff',
         headerStyle: {
-          backgroundColor: '#5f7591',
+          backgroundColor: '#000000a7',
         },
         headerShadowVisible: false,
         headerTintColor: '#fff',
         tabBarStyle: {
-          backgroundColor: '#1357a9',
+          backgroundColor: '#000000da',
         },
       }}
     >
@@ -22,7 +22,7 @@ export default function TabLayout() {
         options={{
           title: 'Images',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'home-sharp': 'home-outline'} color={color} size={24}/>
+            <Ionicons name={focused ? 'images': 'images-outline'} color={color} size={24}/>
           ),
         }}
       />
@@ -40,7 +40,7 @@ export default function TabLayout() {
       <Tabs.Screen 
         name="aiScreen" 
         options={{ 
-          title: 'Model',
+          title: 'Process Images',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'information-circle': 'information-circle-outline'} color={color} size={24}/>
           ),

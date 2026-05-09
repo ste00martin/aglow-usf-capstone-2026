@@ -20,12 +20,15 @@ import {
   ScrollView,
   Pressable,
   Image as RNImage,
+  ActivityIndicator,
 } from "react-native";
 import { Image } from 'expo-image';
-import { useState, useContext, useEffect } from "react";
+import { useState, useContext, useEffect, useRef, useCallback, useLayoutEffect } from "react";
+import { useNavigation } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
 import { useExecutorchModule, ScalarType } from "react-native-executorch";
 import type { TensorPtr } from "react-native-executorch";
-import { AlbumContext } from "../../AlbumContext";
+import { AlbumContext, type AlbumAsset } from "../../AlbumContext";
 import { imageUriToTensor, postprocessBlazeFace, cropFace, imageUriToViTTensor, topFromLogits, allFromLogits } from "../../aipreprocessing" // for type-only imports of BBox, etc.
 import {
   BLAZEFACE_MODEL,
@@ -66,12 +69,24 @@ type ImageResult = {
   error?: string;
 };
 
+function photoAssets(assets: AlbumAsset[]): AlbumAsset[] {
+  return assets.filter((a) => a.mediaType === "photo");
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AiScreen() {
+  const navigation = useNavigation();
   const { assets } = useContext(AlbumContext);
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
+
   const [imageResults, setImageResults] = useState<ImageResult[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
+  /** True only while the async pipeline is executing (not used to choose which screen to show). */
+  const [isProcessing, setIsProcessing] = useState(false);
+  const isProcessingRef = useRef(false);
+  isProcessingRef.current = isProcessing;
+  const forceRerunAfterBatchRef = useRef(false);
 
   const faceDetector = useExecutorchModule({ modelSource: BLAZEFACE_MODEL });
   const ageModel = useExecutorchModule({ modelSource: AGE_MODEL });
@@ -84,119 +99,179 @@ export default function AiScreen() {
     genderModel.isReady &&
     nsfwModel.isReady;
 
+  const requestReplay = useCallback(() => {
+    if (isProcessingRef.current) {
+      forceRerunAfterBatchRef.current = true;
+    } else {
+      setIsProcessing(true);
+    }
+  }, []);
+
+  const photoCount = photoAssets(assets).length;
+
+  useLayoutEffect(() => {
+    const canReplay = isReady && photoCount > 0;
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable
+          onPress={requestReplay}
+          hitSlop={12}
+          style={{ paddingHorizontal: 8, opacity: canReplay ? 1 : 0.4 }}
+          disabled={!canReplay}
+          accessibilityRole="button"
+          accessibilityLabel="Replay pipeline on selected images"
+        >
+          <Ionicons name="reload" size={22} color="#fff" />
+        </Pressable>
+      ),
+    });
+  }, [navigation, requestReplay, isReady, photoCount]);
+
+  // faceDetector, ageModel, genderModel, nsfwModel omitted from deps — listing them restarts the effect every render.
   useEffect(() => {
-    if (!isReady || assets.length === 0 || !isRunning) return;
-    console.log(faceDetector.isReady, ageModel.isReady, genderModel.isReady, nsfwModel.isReady);
+    if (!isProcessing) return;
+    if (!isReady) {
+      setIsProcessing(false);
+      return;
+    }
 
-    const runPipeline = async () => {
-      const results: ImageResult[] = [];
+    // Freeze selection for this run so picks added on the Images tab mid-pipeline are ignored until replay.
+    const snapshotAtRunStart = photoAssets(assetsRef.current);
 
-      for (const asset of assets) {
-        if (asset.mediaType !== "photo") {
-          continue;
+    let cancelled = false;
+
+    const processOnePhoto = async (asset: AlbumAsset, results: ImageResult[]) => {
+      const photoUri = asset.uri;
+
+      try {
+        const inputTensor = await imageUriToTensor(photoUri, BLAZEFACE_INPUT_SIZE);
+
+        const inputTensorPtr: TensorPtr = {
+          dataPtr: inputTensor,
+          sizes: [1, 3, BLAZEFACE_INPUT_SIZE, BLAZEFACE_INPUT_SIZE],
+          scalarType: ScalarType.FLOAT,
+        };
+
+        const detectorOutputs = await faceDetector.forward([inputTensorPtr]);
+        const bboxes = postprocessBlazeFace(detectorOutputs);
+
+        if (bboxes.length === 0) {
+          results.push({ uri: photoUri, faces: [] });
+          setImageResults([...results]);
+          return;
         }
-        const photoUri = asset.uri;
 
-        try {
-          // ── Step 1: BlazeFace detection ──────────────────────────────────
-          const inputTensor = await imageUriToTensor(
-            photoUri,
-            BLAZEFACE_INPUT_SIZE
-          );
+        const faces: FaceResult[] = [];
+        const nonCroppedVitTensor = await imageUriToViTTensor(photoUri);
+        const nonCroppedVitTensorPtr: TensorPtr = {
+          dataPtr: nonCroppedVitTensor,
+          sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],
+          scalarType: ScalarType.FLOAT,
+        };
+        const nsfwOutputs = await nsfwModel.forward([nonCroppedVitTensorPtr]);
+        const nsfwLogits = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
+        const nsfwScores = allFromLogits(nsfwLogits, NSFW_LABELS);
 
-          const inputTensorPtr: TensorPtr = {
-            dataPtr: inputTensor,
-            sizes: [1, 3, BLAZEFACE_INPUT_SIZE, BLAZEFACE_INPUT_SIZE],
-            scalarType: ScalarType.FLOAT,
-          };
-
-          const detectorOutputs = await faceDetector.forward([inputTensorPtr]);
-          const bboxes = postprocessBlazeFace(detectorOutputs);
-
-          if (bboxes.length === 0) {
-            results.push({ uri: photoUri, faces: [] });
+        let photoW = asset.width ?? 0;
+        let photoH = asset.height ?? 0;
+        if (photoW <= 0 || photoH <= 0) {
+          try {
+            const sz = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+              RNImage.getSize(photoUri, (w, h) => resolve({ w, h }), reject);
+            });
+            photoW = sz.w;
+            photoH = sz.h;
+          } catch {
+            results.push({
+              uri: photoUri,
+              faces: [],
+              error: "Could not read image dimensions for cropping.",
+            });
             setImageResults([...results]);
-            continue;
+            return;
           }
+        }
 
-          // ── Step 2–4: Crop → age + gender per face ───────────────────────
-          const faces: FaceResult[] = [];
-          const nonCroppedVitTensor = await imageUriToViTTensor(photoUri);
-          const nonCroppedVitTensorPtr: TensorPtr = {
-            dataPtr: nonCroppedVitTensor,
+        for (const bbox of bboxes) {
+          const croppedUri = await cropFace(photoUri, bbox, photoW, photoH);
+
+          console.log("Cropped Face Result: ", croppedUri);
+
+          const vitTensor = await imageUriToViTTensor(croppedUri);
+          const vitTensorPtr: TensorPtr = {
+            dataPtr: vitTensor,
             sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],
             scalarType: ScalarType.FLOAT,
           };
-          const nsfwOutputs = await nsfwModel.forward([nonCroppedVitTensorPtr]);
-          const nsfwLogits = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
-          const nsfwScores = allFromLogits(nsfwLogits, NSFW_LABELS);
 
-          let photoW = asset.width ?? 0;
-          let photoH = asset.height ?? 0;
-          if (photoW <= 0 || photoH <= 0) {
-            try {
-              const sz = await new Promise<{ w: number; h: number }>((resolve, reject) => {
-                RNImage.getSize(photoUri, (w, h) => resolve({ w, h }), reject);
-              });
-              photoW = sz.w;
-              photoH = sz.h;
-            } catch {
-              results.push({
-                uri: photoUri,
-                faces: [],
-                error: "Could not read image dimensions for cropping.",
-              });
-              setImageResults([...results]);
-              continue;
-            }
-          }
+          const [ageOutputs, genderOutputs] = await Promise.all([
+            ageModel.forward([vitTensorPtr]),
+            genderModel.forward([vitTensorPtr]),
+          ]);
 
-          for (const bbox of bboxes) {
-            const croppedUri = await cropFace(
-              photoUri,
-              bbox,
-              photoW,
-              photoH
-            );
+          const ageLogits = new Float32Array(ageOutputs[0].dataPtr as ArrayBuffer);
+          const genderLogits = new Float32Array(genderOutputs[0].dataPtr as ArrayBuffer);
 
-            console.log("Cropped Face Result: ", croppedUri)
-
-            const vitTensor = await imageUriToViTTensor(croppedUri);
-            const vitTensorPtr: TensorPtr = {
-              dataPtr: vitTensor,
-              sizes: [1, 3, VIT_INPUT_SIZE, VIT_INPUT_SIZE],
-              scalarType: ScalarType.FLOAT,
-            };
-
-            const [ageOutputs, genderOutputs] = await Promise.all([
-              ageModel.forward([vitTensorPtr]),
-              genderModel.forward([vitTensorPtr]),
-            ]);
-
-            const ageLogits = new Float32Array(ageOutputs[0].dataPtr as ArrayBuffer);
-            const genderLogits = new Float32Array(genderOutputs[0].dataPtr as ArrayBuffer);
-
-            faces.push({
-              bbox,
-              faceURI: croppedUri,
-              age: topFromLogits(ageLogits, AGE_LABELS),
-              gender: topFromLogits(genderLogits, GENDER_LABELS),
-              nsfw: nsfwScores,
-            });
-          }
-
-          results.push({ uri: photoUri, faces });
-        } catch (e) {
-          console.error(`Error processing ${photoUri}:`, e);
-          results.push({ uri: photoUri, faces: [], error: String(e) });
+          faces.push({
+            bbox,
+            faceURI: croppedUri,
+            age: topFromLogits(ageLogits, AGE_LABELS),
+            gender: topFromLogits(genderLogits, GENDER_LABELS),
+            nsfw: nsfwScores,
+          });
         }
 
-        setImageResults([...results]);
+        results.push({ uri: photoUri, faces });
+      } catch (e) {
+        console.error(`Error processing ${photoUri}:`, e);
+        results.push({ uri: photoUri, faces: [], error: String(e) });
       }
+
+      setImageResults([...results]);
     };
 
-    runPipeline();
-  }, [isReady, assets, isRunning]);
+    (async () => {
+      let useFrozenSnapshot = true;
+      try {
+        while (!cancelled) {
+          const batch = useFrozenSnapshot
+            ? snapshotAtRunStart
+            : photoAssets(assetsRef.current);
+          useFrozenSnapshot = false;
+
+          if (batch.length === 0) {
+            setImageResults([]);
+            break;
+          }
+
+          const results: ImageResult[] = [];
+
+          for (const asset of batch) {
+            if (cancelled) return;
+            await processOnePhoto(asset, results);
+          }
+
+          if (cancelled) return;
+
+          setImageResults(results);
+
+          // Only replay (forced) runs another pass, using the current album for that pass.
+          const forced = forceRerunAfterBatchRef.current;
+          if (forced) {
+            forceRerunAfterBatchRef.current = false;
+            continue;
+          }
+          break;
+        }
+      } finally {
+        setIsProcessing(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, isProcessing]);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (!isReady) {
@@ -226,21 +301,34 @@ export default function AiScreen() {
     );
   }
 
-  // ── Start button ─────────────────────────────────────────────────────────
-  if (!isRunning) {
-    return (
-      <Pressable
-        style={styles.buttonContainer}
-        onPress={() => setIsRunning(true)}
-      >
-        <Text style={styles.button}>Analyze Faces</Text>
-      </Pressable>
-    );
-  }
+  const showAnalyzePrompt = imageResults.length === 0 && !isProcessing;
 
-  // ── Results ───────────────────────────────────────────────────────────────
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      {isProcessing ? (
+        <View style={styles.runningBanner}>
+          <ActivityIndicator color="#333" />
+          <Text style={styles.runningText}>Running pipeline on selected images…</Text>
+        </View>
+      ) : null}
+
+      {showAnalyzePrompt ? (
+        <View style={styles.startSection}>
+          <Pressable
+            style={styles.buttonContainer}
+            onPress={() => setIsProcessing(true)}
+            disabled={photoCount === 0}
+          >
+            <Text style={styles.button}>Analyze Faces</Text>
+          </Pressable>
+          {photoCount === 0 ? (
+            <Text style={styles.hintText}>Add photos on the Images tab first.</Text>
+          ) : (
+            <Text style={styles.hintText}>{photoCount} photo{photoCount !== 1 ? "s" : ""} selected.</Text>
+          )}
+        </View>
+      ) : null}
+
       {imageResults.map(({ uri, faces, error }) => (
         <View key={uri} style={styles.imageBlock}>
           <Image source={{ uri }} style={styles.headImage}/>
@@ -342,5 +430,30 @@ const styles = StyleSheet.create({
     backgroundColor: "#333",
     margin: 8,
     alignItems: "center",
+  },
+  startSection: {
+    alignItems: "center",
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  hintText: {
+    marginTop: 12,
+    fontSize: 15,
+    color: "#555",
+    textAlign: "center",
+    paddingHorizontal: 16,
+  },
+  runningBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 16,
+    paddingVertical: 8,
+  },
+  runningText: {
+    fontSize: 15,
+    color: "#333",
+    flex: 1,
   },
 });

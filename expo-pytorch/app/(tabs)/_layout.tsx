@@ -51,6 +51,7 @@ export default function TabLayout() {
         name="videoupload" 
         options={{ 
           title: 'Video Upload',
+          headerShown: false,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'videocam': 'videocam-outline'} color={color} size={24}/>
           ),

@@ -110,22 +110,36 @@ export default function AiScreen() {
   const photoCount = photoAssets(assets).length;
 
   useLayoutEffect(() => {
-    const canReplay = isReady && photoCount > 0;
+    const hasCompletedRun = imageResults.length > 0;
+    const canReplay =
+      isReady && photoCount > 0 && !isProcessing && hasCompletedRun;
+    const showReplayInHeader =
+      isReady && !isProcessing && hasCompletedRun && photoCount > 0;
+
     navigation.setOptions({
-      headerRight: () => (
-        <Pressable
-          onPress={requestReplay}
-          hitSlop={12}
-          style={{ paddingHorizontal: 8, opacity: canReplay ? 1 : 0.4 }}
-          disabled={!canReplay}
-          accessibilityRole="button"
-          accessibilityLabel="Replay pipeline on selected images"
-        >
-          <Ionicons name="reload" size={22} color="#fff" />
-        </Pressable>
-      ),
+      headerRight: showReplayInHeader
+        ? () => (
+            <Pressable
+              onPress={requestReplay}
+              hitSlop={12}
+              style={styles.headerReplayBtn}
+              disabled={!canReplay}
+              accessibilityRole="button"
+              accessibilityLabel="Replay pipeline on selected images"
+            >
+              <Ionicons name="reload" size={22} color="#fff" />
+            </Pressable>
+          )
+        : undefined,
     });
-  }, [navigation, requestReplay, isReady, photoCount]);
+  }, [
+    navigation,
+    requestReplay,
+    isReady,
+    photoCount,
+    isProcessing,
+    imageResults.length,
+  ]);
 
   // faceDetector, ageModel, genderModel, nsfwModel omitted from deps — listing them restarts the effect every render.
   useEffect(() => {
@@ -365,6 +379,11 @@ export default function AiScreen() {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  headerReplayBtn: {
+    paddingLeft: 8,
+    paddingVertical: 4,
+    marginRight: 32,
+  },
   container: {
     padding: 16,
   },

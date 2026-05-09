@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View, Linking, StyleSheet, Button, TouchableOpacity, TurboModuleRegistry, ActivityIndicator } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Pressable, ScrollView, Text, View, StyleSheet, ActivityIndicator, useWindowDimensions } from "react-native";
 import { Image } from 'expo-image';
+import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { getDefaultHeaderHeight } from "@react-navigation/elements";
 import * as ImagePicker from 'expo-image-picker';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import * as VideoThumbnails from 'expo-video-thumbnails';
@@ -31,6 +34,24 @@ type ImageResult = {
     nsfw: { label: string; score: number }[];
 };
 
+type ContentSection = "video" | "audio" | "frames" | "flagged" | "transcript";
+
+const SECTION_LABELS: Record<ContentSection, string> = {
+    video: "Video",
+    audio: "Extracted audio",
+    frames: "Frame analysis",
+    flagged: "Flagged frames",
+    transcript: "Transcript",
+};
+
+const DRAWER_ICONS: Record<ContentSection, keyof typeof Ionicons.glyphMap> = {
+    video: "videocam-outline",
+    audio: "musical-notes-outline",
+    frames: "images-outline",
+    flagged: "flag-outline",
+    transcript: "document-text-outline",
+};
+
 function formatTime(ms: number): string { // applies flooring by default, e.g. 5500ms is 0:05, not 0:06
     const totalSeconds = Math.floor(ms / 1000); // convert milliseconds to seconds
     const minutes = Math.floor(totalSeconds / 60);
@@ -50,10 +71,8 @@ export default function VideoUploadScreen() {
 
     const [running, setRunning] = useState(false);
     const [videoLoaded, setVideoLoaded] = useState(false);
-
-    const [totalExpanded, setTotalExpanded] = useState(false);
-    const [flaggedExpanded, setFlaggedExpanded] = useState(false);
-    const [transcriptExpanded, setTranscriptExpanded] = useState(false);
+    const [drawerOpen, setDrawerOpen] = useState(false);
+    const [activeSection, setActiveSection] = useState<ContentSection>("video");
     const [audioButtonStatus, setAudioButtonStatus] = useState<boolean>(false);
 
     const nsfwModel = useExecutorchModule({ modelSource: NSFW_MODEL });
@@ -61,6 +80,14 @@ export default function VideoUploadScreen() {
     const textModel = useExecutorchModule({ modelSource: TEXT_MODEL });
 
     const isReady = nsfwModel.isReady && ttsModel.isReady && textModel.isReady;
+
+    const insets = useSafeAreaInsets();
+    const window = useWindowDimensions();
+    const headerTotalHeight = getDefaultHeaderHeight(
+        { width: window.width, height: window.height },
+        false,
+        insets.top
+    );
 
     useEffect(() => {
         if (!isReady || !running) return;
@@ -71,10 +98,14 @@ export default function VideoUploadScreen() {
             setVideo(""); // reset video URI
             setAudio(null); // reset audio URI
             setTranscript(""); // reset transcript
+            setAudioButtonStatus(false);
+            setActiveSection("video");
+            setDrawerOpen(false);
 
             const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (!permissionResult.granted) {
                 Alert.alert('Permission required', 'Permission to access the media library is required.');
+                setRunning(false);
                 return;
             }
 
@@ -251,6 +282,8 @@ export default function VideoUploadScreen() {
                 setThumbnails([...thumbnails])
                 setFlagged([...flagged])
                 setRunning(false);
+            } else {
+                setRunning(false);
             }
         };
         pickVideo()
@@ -283,237 +316,499 @@ export default function VideoUploadScreen() {
 
     const status = useAudioPlayerStatus(audioPlayer);
 
+    const menuSections = useMemo((): ContentSection[] => {
+        const sections: ContentSection[] = ["video", "audio", "frames"];
+        if (flagged.length > 0) sections.push("flagged");
+        sections.push("transcript");
+        return sections;
+    }, [flagged.length]);
+
+    useEffect(() => {
+        if (activeSection === "flagged" && flagged.length === 0) {
+            setActiveSection("video");
+        }
+    }, [flagged.length, activeSection]);
+
+    const headerTitle = !videoLoaded
+        ? "Video Upload"
+        : running
+            ? "Processing…"
+            : SECTION_LABELS[activeSection];
+
     if (!isReady) {
         return (
-            <View style={[styles.container, { flex: 1, justifyContent: 'center' }]}>
-                <ActivityIndicator size="large" color="#0000ff" />
-                <Text style={{ marginTop: 10 }}>Loading models...</Text>
+            <View style={styles.loadingScreen}>
+                <ActivityIndicator size="large" color="#00c8ff" />
+                <Text style={styles.loadingSubtitle}>Loading models...</Text>
             </View>
         );
     }
 
-    return (
-        <View style={{ flex: 1 }}>
-            {running && (
-                <View style={styles.overlay}>
-                    <ActivityIndicator size="large" color="#fff" />
-                </View>
-            )}
-            <ScrollView
-                contentContainerStyle={styles.container}
-                showsVerticalScrollIndicator={true}
-            >
-                {!videoLoaded ? (
-                    <>
-                        <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
-                            <Text style={styles.button}>Upload a Video.</Text>
-                        </Pressable>
-                    </>
-                ) : (
-                    <>
-                        {!running && (
-                            <>
-                                <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
-                                    <Text style={styles.button}>Upload another Video.</Text>
-                                </Pressable>
-                                <VideoView
-                                    player={player}
-                                    style={styles.video}
-                                    nativeControls
-                                    contentFit="contain"
-                                />
-                            </>
-                        )}
+    const renderSectionBody = () => {
+        if (!videoLoaded || running) return null;
 
-                        {!running && audio != null && (
-                            <View key={audio} style={{ marginVertical: 10 }}>
-                                {audioButtonStatus === false ? (
-                                    <>
-                                        <Pressable
-                                            style={styles.buttonContainer}
-                                            onPress={() => {
-                                                if (!audioPlayer || !status) return;
-
-                                                // Compare current time with duration
-                                                if (status.currentTime < status.duration) {
-                                                    audioPlayer.play(); // resume if not finished
-                                                } else {
-                                                    audioPlayer.seekTo(0); // reset and play if finished
-                                                    audioPlayer.play();
-                                                }
-                                                setAudioButtonStatus(true);
-                                                setFlaggedExpanded(false);
-                                                setTotalExpanded(false);
-                                                setTranscriptExpanded(false)
-                                            }}
-                                        >
-                                            <Text style={styles.button}>Play Audio</Text>
-                                        </Pressable>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Pressable
-                                            style={styles.buttonContainer}
-                                            onPress={() => {
-                                                audioPlayer.pause()
-                                                setAudioButtonStatus(false)
-                                            }}
-                                        >
-                                            <Text style={styles.button}>Pause Audio</Text>
-                                        </Pressable>
-                                    </>
-                                )}
-                                <Text>Playing: {status.playing ? 'Yes' : 'No'}</Text>
-                                <Text>Current Time: {status.currentTime}s</Text>
-                                <Text>Duration: {status.duration}s</Text>
-                            </View>
-
-                        )}
-
-                        {!running && audio != null && (
-                            <View style={{ marginVertical: 10 }}>
+        switch (activeSection) {
+            case "video":
+                return (
+                    <View style={styles.sectionBlock}>
+                        <VideoView
+                            player={player}
+                            style={styles.video}
+                            nativeControls
+                            contentFit="contain"
+                        />
+                    </View>
+                );
+            case "audio":
+                if (audio == null) {
+                    return (
+                        <Text style={styles.mutedCenter}>No extracted audio for this clip.</Text>
+                    );
+                }
+                return (
+                    <View key={audio} style={styles.sectionBlock}>
+                        <View style={styles.audioControlsRow}>
+                            {audioButtonStatus ? (
                                 <Pressable
                                     style={styles.buttonContainer}
                                     onPress={() => {
-                                        if (!audioPlayer) return;
-
-                                        audioPlayer.seekTo(0); // reset to start
-                                        audioPlayer.play();    // immediately play
-                                        setAudioButtonStatus(true); // show the pause button
+                                        audioPlayer.pause();
+                                        setAudioButtonStatus(false);
                                     }}
                                 >
-                                    <Text style={styles.button}>Replay Audio</Text>
+                                    <Text style={styles.button}>Pause</Text>
                                 </Pressable>
+                            ) : (
+                                <Pressable
+                                    style={styles.buttonContainer}
+                                    onPress={() => {
+                                        if (!audioPlayer || !status) return;
+                                        if (status.currentTime < status.duration) {
+                                            audioPlayer.play();
+                                        } else {
+                                            audioPlayer.seekTo(0);
+                                            audioPlayer.play();
+                                        }
+                                        setAudioButtonStatus(true);
+                                    }}
+                                >
+                                    <Text style={styles.button}>Play</Text>
+                                </Pressable>
+                            )}
+                            <Pressable
+                                style={styles.buttonContainer}
+                                onPress={() => {
+                                    if (!audioPlayer) return;
+                                    audioPlayer.seekTo(0);
+                                    audioPlayer.play();
+                                    setAudioButtonStatus(true);
+                                }}
+                            >
+                                <Text style={styles.button}>Replay</Text>
+                            </Pressable>
+                        </View>
+                        <View style={styles.audioMeta}>
+                            <Text style={styles.metaLine}>Playing: {status.playing ? "Yes" : "No"}</Text>
+                            <Text style={styles.metaLine}>
+                                Time: {status.currentTime.toFixed(1)}s / {status.duration.toFixed(1)}s
+                            </Text>
+                        </View>
+                    </View>
+                );
+            case "frames":
+                if (thumbnails.length === 0) {
+                    return (
+                        <Text style={styles.mutedCenter}>No frame analysis yet.</Text>
+                    );
+                }
+                return (
+                    <View style={styles.sectionBlock}>
+                        {thumbnails.map((item) => (
+                            <FrameResultCard item={item} key={`${item.timestamp}-${item.uri}`} />
+                        ))}
+                    </View>
+                );
+            case "flagged":
+                if (flagged.length === 0) {
+                    return (
+                        <Text style={styles.mutedCenter}>No flagged frames for this video.</Text>
+                    );
+                }
+                return (
+                    <View style={styles.sectionBlock}>
+                        {flagged.map((item) => (
+                            <FrameResultCard item={item} key={`${item.timestamp}-${item.uri}`} />
+                        ))}
+                    </View>
+                );
+            case "transcript": {
+                const nonZeroModeration = textModeration.filter(
+                    (res) => (res.score * 100).toFixed(1) !== "0.0"
+                );
+                return (
+                    <View style={styles.sectionBlock}>
+                        <Text style={styles.transcriptText}>
+                            {transcript || "No transcription yet…"}
+                        </Text>
+                        {textModeration.length > 0 && (
+                            <View style={styles.moderationBlock}>
+                                <Text style={styles.moderationHeading}>Text moderation</Text>
+                                <View style={styles.moderationCard}>
+                                    {nonZeroModeration.length > 0 ? (
+                                        nonZeroModeration.map((res, i) => (
+                                            <View key={res.label + i} style={styles.moderationRow}>
+                                                <Text
+                                                    style={[
+                                                        styles.moderationLabel,
+                                                        res.score > 0.4 && styles.moderationLabelFlagged,
+                                                    ]}
+                                                >
+                                                    {res.label}
+                                                </Text>
+                                                <Text
+                                                    style={[
+                                                        styles.moderationScore,
+                                                        res.score > 0.4 && styles.moderationScoreFlagged,
+                                                    ]}
+                                                >
+                                                    {(res.score * 100).toFixed(1)}%
+                                                </Text>
+                                            </View>
+                                        ))
+                                    ) : (
+                                        <Text style={styles.moderationEmpty}>
+                                            All toxicity categories at 0.0%
+                                        </Text>
+                                    )}
+                                </View>
                             </View>
                         )}
+                    </View>
+                );
+            }
+            default:
+                return null;
+        }
+    };
 
-                        {flagged.length > 0 && (
-                            <>
-                                {!flaggedExpanded ? (
-                                    <>
-                                        {flagged.length > 0 && (
-                                            <Pressable style={styles.buttonContainer} onPress={() => {
-                                                setFlaggedExpanded(!flaggedExpanded)
-                                                setTotalExpanded(false);
-                                            }}>
-                                                <Text style={styles.button}>Open Flagged Analysis</Text>
-                                            </Pressable>
-                                        )}
-                                    </>
-                                ) : (
-                                    <>
-                                        <Pressable style={styles.buttonContainer} onPress={() => {
-                                            setFlaggedExpanded(!flaggedExpanded)
-                                        }}>
-                                            <Text style={styles.button}>Close Flagged Analysis</Text>
-                                        </Pressable>
-                                        {flagged.map((item, index) => (
-                                            <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
-                                                <Text>Timestamp: {formatTime(item.timestamp)} </Text>
-                                                <Image
-                                                    source={{ uri: item.uri }}
-                                                    style={{ width: 200, height: 120 }}
-                                                />
-                                                <View>
-                                                    {item.nsfw.map((n, i) => (
-                                                        <Text key={i}>
-                                                            {n.label} ({(n.score * 100).toFixed(1)}%)
-                                                        </Text>
-                                                    ))}
-                                                </View>
-                                            </View>
-                                        ))}
-                                    </>
-                                )}
-                            </>
-                        )}
+    return (
+        <View style={styles.screenRoot}>
+            {running && (
+                <View style={styles.overlay}>
+                    <ActivityIndicator size="large" color="#00c8ff" />
+                </View>
+            )}
+            <View
+                style={[
+                    styles.headerSafe,
+                    { height: headerTotalHeight, paddingTop: insets.top },
+                ]}
+            >
+                <View style={styles.headerRow}>
+                    <View style={styles.headerSideSlot}>
+                        {videoLoaded && !running ? (
+                            <Pressable
+                                onPress={() => setDrawerOpen(true)}
+                                hitSlop={10}
+                                accessibilityRole="button"
+                                accessibilityLabel="Open contents menu"
+                            >
+                                <Ionicons name="menu" size={26} color="#fff" />
+                            </Pressable>
+                        ) : null}
+                    </View>
+                    <Text style={styles.headerTitleText} numberOfLines={1}>
+                        {headerTitle}
+                    </Text>
+                    <View style={styles.headerSideSlot}>
+                        {videoLoaded && !running ? (
+                            <Pressable
+                                onPress={() => setRunning(true)}
+                                hitSlop={10}
+                                accessibilityRole="button"
+                                accessibilityLabel="Upload another video"
+                            >
+                                <Ionicons name="add-circle-outline" size={26} color="#fff" />
+                            </Pressable>
+                        ) : null}
+                    </View>
+                </View>
+            </View>
 
-                        {(!totalExpanded) ? (
-                            <>
-                                {thumbnails.length > 0 && (
-                                    <Pressable style={styles.buttonContainer} onPress={() => {
-                                        setTotalExpanded(!totalExpanded)
-                                        setFlaggedExpanded(false);
-                                    }}>
-                                        <Text style={styles.button}>Open Frame Analysis</Text>
-                                    </Pressable>
-                                )}
-                            </>
-                        ) : (
-                            <>
-                                <Pressable style={styles.buttonContainer} onPress={() => setTotalExpanded(!totalExpanded)}>
-                                    <Text style={styles.button}>Close Frame Analysis</Text>
-                                </Pressable>
-                                {thumbnails.map((item, index) => (
-                                    <View key={index} style={{ marginVertical: 15, alignItems: 'center' }}>
-                                        <Text>Timestamp: {formatTime(item.timestamp)}</Text>
-                                        <Image
-                                            source={{ uri: item.uri }}
-                                            style={{ width: 200, height: 120 }}
-                                        />
-                                        <View>
-                                            {item.nsfw.map((n, i) => (
-                                                <Text key={i}>
-                                                    {n.label} ({(n.score * 100).toFixed(1)}%)
-                                                </Text>
-                                            ))}
-                                        </View>
-                                    </View>
-                                ))}
-                            </>
-                        )}
-
-                        {(!transcriptExpanded) ? (
-                            <>
-                                {thumbnails.length > 0 && (
-                                    <Pressable style={styles.buttonContainer} onPress={() => {
-                                        setTranscriptExpanded(!transcriptExpanded)
-                                        setFlaggedExpanded(false);
-                                    }}>
-                                        <Text style={styles.button}>Open Transcript</Text>
-                                    </Pressable>
-                                )}
-                            </>
-                        ) : (
-                            <>
-                                <Pressable style={styles.buttonContainer} onPress={() => setTranscriptExpanded(!transcriptExpanded)}>
-                                    <Text style={styles.button}>Close Transcript</Text>
-                                </Pressable>
-                                <Text style={styles.text}>
-                                    {transcript || "No transcription yet..."}
-                                </Text>
-                                {textModeration.length > 0 && (
-                                    <View style={{ marginTop: 20, alignItems: 'center', width: '100%' }}>
-                                        <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Text Moderation Results:</Text>
-                                        <View style={{ backgroundColor: '#f0f0f0', padding: 15, borderRadius: 10, width: '90%' }}>
-                                            {textModeration.filter(res => (res.score * 100).toFixed(1) !== "0.0").length > 0 ? (
-                                                textModeration.filter(res => (res.score * 100).toFixed(1) !== "0.0").map((res, i) => (
-                                                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                                                        <Text style={{ color: res.score > 0.4 ? 'red' : 'black', fontWeight: res.score > 0.4 ? 'bold' : 'normal' }}>
-                                                            {res.label}
-                                                        </Text>
-                                                        <Text style={{ color: res.score > 0.4 ? 'red' : 'black' }}>
-                                                            {(res.score * 100).toFixed(1)}%
-                                                        </Text>
-                                                    </View>
-                                                ))
-                                            ) : (
-                                                <Text style={{ textAlign: 'center', fontStyle: 'italic', color: '#666' }}>All toxicity categories at 0.0%</Text>
-                                            )}
-                                        </View>
-                                    </View>
-                                )}
-                            </>
-                        )}
-                    </>
+            <ScrollView
+                contentContainerStyle={styles.bodyScroll}
+                showsVerticalScrollIndicator
+            >
+                {!videoLoaded ? (
+                    <Pressable style={styles.buttonContainer} onPress={() => setRunning(true)}>
+                        <Text style={styles.button}>Upload a Video</Text>
+                    </Pressable>
+                ) : (
+                    renderSectionBody()
                 )}
             </ScrollView>
+
+            {drawerOpen && videoLoaded && !running ? (
+                <View style={styles.drawerRoot} pointerEvents="box-none">
+                    <Pressable
+                        style={styles.drawerBackdrop}
+                        onPress={() => setDrawerOpen(false)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Close menu"
+                    />
+                    <SafeAreaView edges={["top", "left", "bottom"]} style={styles.drawerSheet}>
+                        <Text style={styles.drawerHeading}>Contents</Text>
+                        {menuSections.map((section) => {
+                            const active = activeSection === section;
+                            return (
+                                <Pressable
+                                    key={section}
+                                    style={[styles.drawerItem, active && styles.drawerItemActive]}
+                                    onPress={() => {
+                                        setActiveSection(section);
+                                        setDrawerOpen(false);
+                                    }}
+                                >
+                                    <Ionicons
+                                        name={DRAWER_ICONS[section]}
+                                        size={22}
+                                        color={active ? "#00c8ff" : "#555"}
+                                    />
+                                    <Text
+                                        style={[styles.drawerItemLabel, active && styles.drawerItemLabelActive]}
+                                    >
+                                        {SECTION_LABELS[section]}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </SafeAreaView>
+                </View>
+            ) : null}
+        </View>
+    );
+}
+
+function FrameResultCard({ item }: { item: ImageResult }) {
+    return (
+        <View style={styles.frameCard}>
+            <Text style={styles.frameTimestamp}>Timestamp: {formatTime(item.timestamp)}</Text>
+            <Image source={{ uri: item.uri }} style={styles.frameImage} />
+            <View style={styles.frameLabels}>
+                {item.nsfw.map((n, i) => (
+                    <Text key={n.label + i} style={styles.frameLabelLine}>
+                        {n.label} ({(n.score * 100).toFixed(1)}%)
+                    </Text>
+                ))}
+            </View>
         </View>
     );
 }
 
 
 const styles = StyleSheet.create({
+    loadingScreen: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+        backgroundColor: "#ffffff",
+    },
+    loadingSubtitle: {
+        marginTop: 10,
+        fontSize: 16,
+        color: "#333",
+    },
+    screenRoot: {
+        flex: 1,
+        backgroundColor: "#ffffff",
+    },
+    headerSafe: {
+        backgroundColor: "#000000a7",
+    },
+    headerRow: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 8,
+    },
+    headerSideSlot: {
+        width: 44,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    headerTitleText: {
+        flex: 1,
+        textAlign: "center",
+        color: "#fff",
+        fontSize: 17,
+        fontWeight: "600",
+    },
+    bodyScroll: {
+        flexGrow: 1,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        alignItems: "center",
+        backgroundColor: "#ffffff",
+    },
+    sectionBlock: {
+        width: "100%",
+        alignItems: "stretch",
+    },
+    audioControlsRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        justifyContent: "center",
+        marginBottom: 16,
+    },
+    audioMeta: {
+        width: "100%",
+        padding: 12,
+        backgroundColor: "#f5f5f5",
+        borderRadius: 8,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: "#e0e0e0",
+    },
+    metaLine: {
+        fontSize: 15,
+        color: "#333",
+        marginBottom: 4,
+    },
+    mutedCenter: {
+        marginTop: 24,
+        fontSize: 16,
+        color: "#666",
+        textAlign: "center",
+    },
+    frameCard: {
+        marginBottom: 20,
+        alignItems: "center",
+        width: "100%",
+    },
+    frameTimestamp: {
+        fontSize: 15,
+        fontWeight: "600",
+        marginBottom: 8,
+        color: "#111",
+    },
+    frameImage: {
+        width: "100%",
+        maxWidth: 320,
+        aspectRatio: 16 / 10,
+        borderRadius: 8,
+        backgroundColor: "#eee",
+    },
+    frameLabels: {
+        marginTop: 10,
+        alignSelf: "stretch",
+        maxWidth: 320,
+    },
+    frameLabelLine: {
+        fontSize: 14,
+        color: "#333",
+        marginBottom: 4,
+    },
+    transcriptText: {
+        fontSize: 16,
+        lineHeight: 24,
+        color: "#111",
+        width: "100%",
+    },
+    moderationBlock: {
+        marginTop: 24,
+        width: "100%",
+    },
+    moderationHeading: {
+        fontWeight: "700",
+        fontSize: 17,
+        marginBottom: 10,
+        color: "#111",
+    },
+    moderationCard: {
+        backgroundColor: "#f5f5f5",
+        padding: 15,
+        borderRadius: 10,
+        width: "100%",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: "#e0e0e0",
+    },
+    moderationRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        marginBottom: 6,
+    },
+    moderationLabel: {
+        color: "#222",
+        fontSize: 15,
+        flex: 1,
+        marginRight: 8,
+    },
+    moderationLabelFlagged: {
+        color: "#c0392b",
+        fontWeight: "700",
+    },
+    moderationScore: {
+        fontSize: 15,
+        color: "#222",
+    },
+    moderationScoreFlagged: {
+        color: "#c0392b",
+        fontWeight: "600",
+    },
+    moderationEmpty: {
+        textAlign: "center",
+        fontStyle: "italic",
+        color: "#666",
+    },
+    drawerRoot: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 100,
+    },
+    drawerBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: "rgba(0,0,0,0.35)",
+    },
+    drawerSheet: {
+        position: "absolute",
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: 288,
+        backgroundColor: "#ffffff",
+        borderRightWidth: StyleSheet.hairlineWidth,
+        borderRightColor: "#e0e0e0",
+        paddingHorizontal: 12,
+        paddingTop: 8,
+    },
+    drawerHeading: {
+        fontSize: 13,
+        fontWeight: "700",
+        color: "#666",
+        textTransform: "uppercase",
+        letterSpacing: 0.6,
+        marginBottom: 12,
+        marginTop: 4,
+    },
+    drawerItem: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 14,
+        paddingHorizontal: 10,
+        borderRadius: 10,
+        marginBottom: 4,
+    },
+    drawerItemActive: {
+        backgroundColor: "rgba(0, 200, 255, 0.12)",
+    },
+    drawerItemLabel: {
+        fontSize: 16,
+        color: "#222",
+        flex: 1,
+        marginLeft: 12,
+    },
+    drawerItemLabelActive: {
+        color: "#00c8ff",
+        fontWeight: "600",
+    },
     button: {
         fontSize: 20,
         color: '#fff',
@@ -531,22 +826,18 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: 10,
     },
-    image: {
-        width: 200,
-        height: 200,
-    },
     overlay: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        backgroundColor: 'rgba(0,0,0,0.45)',
         justifyContent: 'center',
         alignItems: 'center',
+        zIndex: 200,
     },
     video: {
         width: '100%',
         aspectRatio: 16 / 9,
-        marginVertical: 20,
-    },
-    text: {
-        fontSize: 16,
+        marginVertical: 12,
+        borderRadius: 8,
+        backgroundColor: "#000",
     },
 });

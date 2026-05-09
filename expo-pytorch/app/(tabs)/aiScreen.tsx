@@ -19,6 +19,7 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
+  Image as RNImage,
 } from "react-native";
 import { Image } from 'expo-image';
 import { useState, useContext, useEffect } from "react";
@@ -130,12 +131,32 @@ export default function AiScreen() {
           const nsfwLogits = new Float32Array(nsfwOutputs[0].dataPtr as ArrayBuffer);
           const nsfwScores = allFromLogits(nsfwLogits, NSFW_LABELS);
 
+          let photoW = asset.width ?? 0;
+          let photoH = asset.height ?? 0;
+          if (photoW <= 0 || photoH <= 0) {
+            try {
+              const sz = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+                RNImage.getSize(photoUri, (w, h) => resolve({ w, h }), reject);
+              });
+              photoW = sz.w;
+              photoH = sz.h;
+            } catch {
+              results.push({
+                uri: photoUri,
+                faces: [],
+                error: "Could not read image dimensions for cropping.",
+              });
+              setImageResults([...results]);
+              continue;
+            }
+          }
+
           for (const bbox of bboxes) {
             const croppedUri = await cropFace(
               photoUri,
               bbox,
-              asset.width,
-              asset.height
+              photoW,
+              photoH
             );
 
             console.log("Cropped Face Result: ", croppedUri)

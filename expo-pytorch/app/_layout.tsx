@@ -1,11 +1,10 @@
 import { Stack } from "expo-router";
-import { AlbumContext } from "../AlbumContext";
-import * as MediaLibrary from "expo-media-library";
+import { AlbumContext, type AlbumAsset } from "../AlbumContext";
 import { useState } from "react";
 
 
 export default function RootLayout() {
-  const [assets, setAssets] = useState<MediaLibrary.Asset[]>([])
+  const [assets, setAssets] = useState<AlbumAsset[]>([])
   return(
     <AlbumContext.Provider value={{ assets, setAssets}}>
       <Stack>

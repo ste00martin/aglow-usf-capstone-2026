@@ -370,16 +370,20 @@ export default function VideoUploadScreen() {
                         <View style={styles.audioControlsRow}>
                             {audioButtonStatus ? (
                                 <Pressable
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Pause"
                                     style={styles.buttonContainer}
                                     onPress={() => {
                                         audioPlayer.pause();
                                         setAudioButtonStatus(false);
                                     }}
                                 >
-                                    <Text style={styles.button}>Pause</Text>
+                                    <Ionicons name="pause-outline" size={24} color="#fff" />
                                 </Pressable>
                             ) : (
                                 <Pressable
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Play"
                                     style={styles.buttonContainer}
                                     onPress={() => {
                                         if (!audioPlayer || !status) return;
@@ -392,10 +396,12 @@ export default function VideoUploadScreen() {
                                         setAudioButtonStatus(true);
                                     }}
                                 >
-                                    <Text style={styles.button}>Play</Text>
+                                    <Ionicons name="play-outline" size={24} color="#fff" />
                                 </Pressable>
                             )}
                             <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel="Replay"
                                 style={styles.buttonContainer}
                                 onPress={() => {
                                     if (!audioPlayer) return;
@@ -404,7 +410,7 @@ export default function VideoUploadScreen() {
                                     setAudioButtonStatus(true);
                                 }}
                             >
-                                <Text style={styles.button}>Replay</Text>
+                                <Ionicons name="reload-outline" size={24} color="#fff" />
                             </Pressable>
                         </View>
                         <View style={styles.audioMeta}>

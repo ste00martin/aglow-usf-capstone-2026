@@ -1,0 +1,8 @@
+.env
+.env.*
+venv/
+__pycache__/
+*.pyc
+recommendations.csv
+pca_users.png
+.ipynb_checkpoints/

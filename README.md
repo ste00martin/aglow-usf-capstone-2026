@@ -23,25 +23,25 @@ You now are running the app on the simulator. To add photos and videos for testi
 
 The following were tested on [UTKFace](https://susanqq.github.io/UTKFace/) - dataset of over 24,000 faces of different ages
 - BlazeFace:  
-P50: 15.754 ms
-P90: 21.670 ms
-P99: 60.105 ms
+    - P50: 15.754 ms
+    - P90: 21.670 ms
+    - P99: 60.105 ms
 
 - Age + gender:
-P50: 106.449 ms
-P90: 134.568 ms
-P99: 236.987 ms
+    - P50: 106.449 ms
+    - P90: 134.568 ms
+    - P99: 236.987 ms
 
 The Ateeqq/nsfw-image-detection model was tested on the [DETECTOR_AUTO_GENERATED_DATA](https://github.com/notAI-tech/NudeNet/releases/download/v0/DETECTOR_AUTO_GENERATED_DATA.zip) dataset, which consists of 20,000 NSFW images
 - NSFW images:
-P50: 117.319 ms
-P90: 153.851 ms
-P99: 290.513 ms
+    - P50: 117.319 ms
+    - P90: 153.851 ms
+    - P99: 290.513 ms
 
 The ifmain/ModerationBERT-En-02 model was tested on 20,000 comments from the [Jigsaw Toxic Comment Dataset](https://huggingface.co/datasets/thesofakillers/jigsaw-toxic-comment-classification-challenge/viewer/default/train?row=5)
 - NSFW text:
-P50 : 24.377 ms
-P90 : 59.919 ms
-P99 : 135.954 ms
+    - P50: 24.377 ms
+    - P90: 59.919 ms
+    - P99: 135.954 ms
 
 

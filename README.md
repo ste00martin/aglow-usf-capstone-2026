@@ -3,9 +3,9 @@
 - To run the app on an iOS Simulator, you must have a computer running MacOS. You will need to install Xcode, and then install the command line tools by going to Settings, then clicking Locations and selecting the most recent version from the Command Line Tools dropdown. Finally, to install the iOS simulator, open Xcode > Settings... > Components, and under Platform Support > iOS ..., click Get.
 
 After cloning the app:
-1.) Run the commands 'scripts/export_models_ios_coreml.sh' and 'scripts/export_models_xnnpack.sh' to get all of the models on your local machine
-2.) Run the command 'cd expo-pytorch'
-3.) In the 'expo-pytorch' folder, run 'npm install', then 'npx expo run:ios'
+1. Run the commands 'scripts/export_models_ios_coreml.sh' and 'scripts/export_models_xnnpack.sh' to get all of the models on your local machine
+2. Run the command 'cd expo-pytorch'
+3. In the 'expo-pytorch' folder, run 'npm install', then 'npx expo run:ios'
 
 You now are running the app on the simulator. To add photos and videos for testing, click the home button at the top right, then add them in the Photos app directly from your computer. 
 
